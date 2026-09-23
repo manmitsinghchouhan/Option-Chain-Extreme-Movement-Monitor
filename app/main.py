@@ -16,15 +16,8 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-from app.alerts.manager import AlertManager
-from app.data.dhan import DhanMarketDataProvider
-from app.data.dummy import DummyMarketDataProvider
 from app.data.models import MarketTick, OptionTick, OptionType
-from app.data.scrip_master import DhanScripMaster
-from app.detection.detector import ExtremeDetector
-from app.movement.calculator import calculate_movement
-from app.notifications.telegram import TelegramNotifier
-from app.state.manager import StateManager
+from app.engine import MonitorEngine
 from app.stocks import get_symbols
 
 load_dotenv()
@@ -110,48 +103,18 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# -------------------------------------------------------------------
-# Session state initialization
-# -------------------------------------------------------------------
 
-if "state_manager" not in st.session_state:
-    st.session_state.state_manager = StateManager(window_minutes=60)
+@st.cache_resource
+def get_monitor_engine() -> MonitorEngine:
+    """Create a single, server-wide shared MonitorEngine instance."""
+    return MonitorEngine()
 
-if "detector" not in st.session_state:
-    st.session_state.detector = ExtremeDetector(thresholds=(60.0, 70.0, 80.0), allow_up=False, allow_down=True)
 
-if "alert_manager" not in st.session_state:
-    st.session_state.alert_manager = AlertManager()
-
-if "notifier" not in st.session_state:
-    st.session_state.notifier = TelegramNotifier()
-
-if "recent_alerts" not in st.session_state:
-    st.session_state.recent_alerts = []
-
-if "update_count" not in st.session_state:
-    st.session_state.update_count = 0
-
-if "live_ticks_received" not in st.session_state:
-    st.session_state.live_ticks_received = 0
-
-if "auto_stream" not in st.session_state:
-    st.session_state.auto_stream = False
-
-if "dummy_provider" not in st.session_state:
-    st.session_state.dummy_provider = DummyMarketDataProvider(
-        update_interval_seconds=0,
-        strikes_above_below=4,
-        enable_random_spikes=True,
-    )
-
-if "dhan_provider" not in st.session_state:
-    st.session_state.dhan_provider = DhanMarketDataProvider(strikes_above_below=6)
-
-state_manager: StateManager = st.session_state.state_manager
-detector: ExtremeDetector = st.session_state.detector
-alert_manager: AlertManager = st.session_state.alert_manager
-notifier: TelegramNotifier = st.session_state.notifier
+engine = get_monitor_engine()
+state_manager = engine.state_manager
+detector = engine.detector
+alert_manager = engine.alert_manager
+notifier = engine.notifier
 all_symbols = get_symbols()
 
 # -------------------------------------------------------------------
@@ -175,8 +138,8 @@ is_dhan_mode = "DhanHQ" in selected_provider_mode
 st.sidebar.markdown("---")
 st.sidebar.subheader("🔌 Connection Status")
 if is_dhan_mode:
-    if st.session_state.dhan_provider and st.session_state.dhan_provider.last_error:
-        st.sidebar.error(st.session_state.dhan_provider.last_error)
+    if engine.dhan_provider and engine.dhan_provider.last_error:
+        st.sidebar.error(engine.dhan_provider.last_error)
         st.sidebar.caption("Provide your Dhan Client ID & Access Token below or in Streamlit Cloud Secrets.")
     else:
         st.sidebar.success("🟢 DhanHQ v2 API: Authenticated")
@@ -188,20 +151,10 @@ if is_dhan_mode:
         new_client_id = st.text_input("Dhan Client ID", value=curr_client_id, key="daily_client_id_input")
         new_token_input = st.text_input("Dhan Access Token", type="password", key="daily_token_input", help="Paste access token from dhanhq.co")
         if st.button("Apply & Connect", width='stretch', key="apply_daily_token"):
-            if new_client_id.strip():
-                os.environ["DHAN_CLIENT_ID"] = new_client_id.strip()
-                if st.session_state.dhan_provider:
-                    st.session_state.dhan_provider.client_id = new_client_id.strip()
-            if new_token_input.strip():
-                clean_tok = new_token_input.strip()
-                os.environ["DHAN_ACCESS_TOKEN"] = clean_tok
-                if st.session_state.dhan_provider:
-                    st.session_state.dhan_provider.access_token = clean_tok
-            if st.session_state.dhan_provider and st.session_state.dhan_provider.client_id and st.session_state.dhan_provider.access_token:
-                st.session_state.dhan_provider.last_error = None
-                if st.session_state.dhan_provider._running:
-                    st.session_state.dhan_provider.stop()
-                st.session_state.cached_real_chains = {}
+            cid = new_client_id.strip() if new_client_id.strip() else curr_client_id
+            tok = new_token_input.strip()
+            if cid and tok:
+                engine.update_dhan_credentials(cid, tok)
                 st.toast("✅ DhanHQ credentials updated! Reconnecting...", icon="🔑")
                 st.rerun()
             else:
@@ -242,7 +195,7 @@ with h_col1:
     mode_text = "DhanHQ Live Real-Time Feed" if is_dhan_mode else "Offline Simulation Mode"
     st.caption(f"Scanner [{mode_text}] — Monitoring 210 F&O Stocks for -60%, -70%, -80% Down Spikes & Crashes")
 with h_col2:
-    if st.session_state.auto_stream:
+    if engine.is_streaming_active:
         st.markdown('<div style="text-align: right; margin-top: 15px;"><span class="live-badge live-active">● STREAMING LIVE</span></div>', unsafe_allow_html=True)
     else:
         st.markdown('<div style="text-align: right; margin-top: 15px;"><span class="live-badge live-paused">⏸️ STREAM PAUSED</span></div>', unsafe_allow_html=True)
@@ -257,13 +210,13 @@ with col3:
 with col4:
     st.metric("Alert Thresholds", "-60%, -70%, -80%")
 with col5:
-    st.metric("Active Alerts Triggered", f"{len(st.session_state.recent_alerts)}")
+    st.metric("Active Alerts Triggered", f"{len(engine.recent_alerts)}")
 
 st.divider()
 
-if is_dhan_mode and st.session_state.dhan_provider and st.session_state.dhan_provider.last_error:
-    st.error(f"🚨 **Authentication Error:** {st.session_state.dhan_provider.last_error}")
-    st.info("💡 **Quick Fix:** 1. Generate a new token from [DhanHQ Portal](https://dhanhq.co/) ➔ 2. Update `DHAN_ACCESS_TOKEN` in `.env` ➔ 3. Click '🔄 Refresh Data' or toggle Live Streaming.")
+if is_dhan_mode and engine.dhan_provider and engine.dhan_provider.last_error:
+    st.error(f"🚨 **Authentication Error:** {engine.dhan_provider.last_error}")
+    st.info("💡 **Quick Fix:** 1. Generate a new token from [DhanHQ Portal](https://dhanhq.co/) ➔ 2. Paste in sidebar 'DhanHQ Credentials Updater' or update Secrets.")
 
 # -------------------------------------------------------------------
 # Streaming Controls
@@ -272,129 +225,53 @@ if is_dhan_mode and st.session_state.dhan_provider and st.session_state.dhan_pro
 ctrl1, ctrl2, ctrl3, ctrl4 = st.columns([2, 2, 2, 1.5])
 
 with ctrl1:
-    auto_stream_toggle = st.toggle("🟢 Live Auto-Streaming", value=st.session_state.auto_stream)
-    if auto_stream_toggle != st.session_state.auto_stream:
-        st.session_state.auto_stream = auto_stream_toggle
-        if auto_stream_toggle and is_dhan_mode and st.session_state.dhan_provider:
-            load_dotenv(override=True)
-            st.session_state.dhan_provider.access_token = os.getenv("DHAN_ACCESS_TOKEN")
-            st.session_state.dhan_provider.last_error = None
+    auto_stream_toggle = st.toggle("🟢 Live Auto-Streaming", value=engine.is_streaming_active)
+    if auto_stream_toggle != engine.is_streaming_active:
+        if auto_stream_toggle:
+            if is_dhan_mode:
+                load_dotenv(override=True)
+                engine.dhan_provider.access_token = os.getenv("DHAN_ACCESS_TOKEN", engine.dhan_provider.access_token)
+                engine.start_dhan_feed()
+            else:
+                engine.is_streaming_active = True
+        else:
+            engine.stop_dhan_feed()
         st.rerun()
 
 with ctrl2:
-    run_single_batch = st.button("▶ Step One Batch", width='stretch', disabled=st.session_state.auto_stream or is_dhan_mode)
+    run_single_batch = st.button("▶ Step One Batch", width='stretch', disabled=engine.is_streaming_active or is_dhan_mode)
 
 with ctrl3:
     inject_spike = st.button("💥 Inject Down Spike (-75%)", width='stretch', disabled=is_dhan_mode)
 
 with ctrl4:
     if st.button("🗑 Clear State", width='stretch'):
-        state_manager.clear()
-        alert_manager.clear()
-        st.session_state.recent_alerts = []
-        st.session_state.update_count = 0
-        st.session_state.live_ticks_received = 0
-        st.success("State cleared.")
+        engine.clear_state()
+        st.success("Server state cleared.")
         st.rerun()
 
-if is_dhan_mode and not st.session_state.auto_stream:
+if is_dhan_mode and not engine.is_streaming_active:
     st.info("💡 **DhanHQ Mode is selected.** Turn ON **'🟢 Live Auto-Streaming'** to start receiving real-time ticks from the DhanHQ WebSocket.")
 
 # -------------------------------------------------------------------
-# Background Dhan WebSocket Feed Launcher
+# Execution Engine (Simulation & Background Sync)
 # -------------------------------------------------------------------
-
-if is_dhan_mode and st.session_state.auto_stream:
-    if st.session_state.dhan_provider:
-        if st.session_state.dhan_provider.last_error:
-            # Auto-reset streaming and immediately rerun to render toggle as OFF in UI
-            st.session_state.auto_stream = False
-            st.session_state.dhan_provider.stop()
-            st.rerun()
-        elif not st.session_state.dhan_provider._running:
-            st.session_state.dhan_provider.start_background_feed(state_manager.update)
-elif not st.session_state.auto_stream or not is_dhan_mode:
-    if st.session_state.dhan_provider and st.session_state.dhan_provider._running:
-        st.session_state.dhan_provider.stop()
-
-# -------------------------------------------------------------------
-# Execution Engine (Strict separation of Dhan vs Dummy)
-# -------------------------------------------------------------------
-
-should_process = st.session_state.auto_stream or run_single_batch or inject_spike
 
 if inject_spike and not is_dhan_mode:
-    spiked_key = st.session_state.dummy_provider.inject_extreme_spike(percentage_change=-75.0)
+    spiked_key = engine.inject_simulation_spike(percentage_change=-75.0)
     st.toast(f"⚡ Injected -75% crash into contract: {spiked_key}!", icon="📉")
 
-if should_process:
-    ticks: list[OptionTick] = []
+if run_single_batch and not is_dhan_mode:
+    new_sim_alerts = engine.step_simulation()
+    if new_sim_alerts:
+        st.toast(f"🚨 {len(new_sim_alerts)} New Extreme Movement Alert(s) Detected!", icon="⚡")
 
-    if is_dhan_mode and st.session_state.dhan_provider:
-        # Drain all real live ticks that arrived in DhanMarketDataProvider live_queue
-        while not st.session_state.dhan_provider.live_queue.empty():
-            try:
-                tick = st.session_state.dhan_provider.live_queue.get_nowait()
-                ticks.append(tick)
-            except Exception:
-                break
-        
-        st.session_state.live_ticks_received += len(ticks)
-        st.session_state.update_count += 1
-    else:
-        # In Simulation Mode, generate simulated ticks
-        ticks = st.session_state.dummy_provider.generate_option_ticks()
-        st.session_state.update_count += 1
+if engine.is_streaming_active and not is_dhan_mode:
+    new_sim_alerts = engine.step_simulation()
+    if new_sim_alerts:
+        st.toast(f"🚨 {len(new_sim_alerts)} New Extreme Movement Alert(s) Detected!", icon="⚡")
 
-    new_alerts = []
-
-    for tick in ticks:
-        state_manager.update(tick)
-
-        if not isinstance(tick, OptionTick):
-            continue
-
-        history = state_manager.get_history(tick.instrument_key)
-
-        if len(history) < 2:
-            continue
-
-        movement = calculate_movement(history)
-        if movement is None:
-            continue
-
-        # Automatically reset active threshold flags if price retreats below threshold
-        alert_manager.sync_resets(
-            instrument_key=tick.instrument_key,
-            percentage_change=movement.percentage_change,
-            thresholds=detector.thresholds,
-        )
-
-        events = detector.detect(
-            symbol=tick.symbol,
-            movement=movement,
-            strike_price=tick.strike_price,
-            option_type=tick.option_type,
-            expiry=tick.expiry,
-            instrument_key=tick.instrument_key,
-            underlying_price=tick.underlying_price,
-        )
-
-        for event in events:
-            if alert_manager.process(event):
-                new_alerts.append(event)
-                if notifier.is_configured():
-                    try:
-                        notifier.send(event)
-                    except Exception:
-                        pass
-
-    if new_alerts:
-        st.session_state.recent_alerts = new_alerts + st.session_state.recent_alerts
-        st.session_state.recent_alerts = st.session_state.recent_alerts[:100]
-        st.toast(f"🚨 {len(new_alerts)} New Extreme Movement Alert(s) Detected!", icon="⚡")
-
-if is_dhan_mode and st.session_state.auto_stream and st.session_state.live_ticks_received == 0:
+if is_dhan_mode and engine.is_streaming_active and engine.live_ticks_received == 0:
     st.warning("🌙 **Market Currently Closed:** Connected to DhanHQ Live WebSocket, but NSE is currently closed (Trading hours: 9:15 AM - 3:30 PM IST). 0 live trade ticks received after hours.")
 
 # -------------------------------------------------------------------
@@ -424,20 +301,20 @@ if movers:
     st.markdown("<br>", unsafe_allow_html=True)
 
 # -------------------------------------------------------------------
-# Live Extreme Alerts Feed
+# Live Extreme Alerts Feed (Shared Global Stream)
 # -------------------------------------------------------------------
 
 st.subheader("🚨 Live Extreme Option Alerts")
 
-if st.session_state.recent_alerts:
+if engine.recent_alerts:
     f_col1, f_col2 = st.columns([1, 1])
     with f_col1:
-        symbols_with_alerts = sorted(list({e.symbol for e in st.session_state.recent_alerts}))
+        symbols_with_alerts = sorted(list({e.symbol for e in engine.recent_alerts}))
         selected_alert_symbol = st.selectbox("Filter alerts by Stock", ["ALL"] + symbols_with_alerts)
     with f_col2:
         selected_dir = st.selectbox("Filter by Direction", ["ALL", "UP (+)", "DOWN (-)"])
 
-    filtered_alerts = st.session_state.recent_alerts
+    filtered_alerts = engine.recent_alerts
     if selected_alert_symbol != "ALL":
         filtered_alerts = [e for e in filtered_alerts if e.symbol == selected_alert_symbol]
     if selected_dir == "UP (+)":
@@ -490,9 +367,6 @@ st.divider()
 
 st.subheader("📊 Live Option Chain Matrix")
 
-if "cached_real_chains" not in st.session_state:
-    st.session_state.cached_real_chains = {}
-
 stock_col, ref_col = st.columns([4, 1.2])
 
 with stock_col:
@@ -509,17 +383,16 @@ with ref_col:
 
 chain_rows = []
 
-if is_dhan_mode and st.session_state.dhan_provider:
-    # Only make network REST call once per stock selection or on manual refresh
-    if selected_stock not in st.session_state.cached_real_chains or refresh_snapshot:
+if is_dhan_mode and engine.dhan_provider:
+    if selected_stock not in engine.cached_real_chains or refresh_snapshot:
         if refresh_snapshot:
             load_dotenv(override=True)
-            st.session_state.dhan_provider.access_token = os.getenv("DHAN_ACCESS_TOKEN")
-            st.session_state.dhan_provider.last_error = None
+            engine.dhan_provider.access_token = os.getenv("DHAN_ACCESS_TOKEN", engine.dhan_provider.access_token)
+            engine.dhan_provider.last_error = None
         with st.spinner(f"Loading DhanHQ real option chain snapshot for {selected_stock}..."):
-            real_chain = st.session_state.dhan_provider.fetch_real_option_chain(selected_stock)
+            real_chain = engine.dhan_provider.fetch_real_option_chain(selected_stock)
             if real_chain:
-                st.session_state.cached_real_chains[selected_stock] = real_chain
+                engine.cached_real_chains[selected_stock] = real_chain
                 if real_chain.get("spot_price", 0) > 0:
                     state_manager.update(MarketTick(
                         symbol=selected_stock,
@@ -557,7 +430,7 @@ if is_dhan_mode and st.session_state.dhan_provider:
                         if not state_manager.get_latest(pe_t.instrument_key):
                             state_manager.update(pe_t)
 
-    cached_chain = st.session_state.cached_real_chains.get(selected_stock)
+    cached_chain = engine.cached_real_chains.get(selected_stock)
 
     if cached_chain and cached_chain.get("strikes"):
         spot_price = state_manager.get_underlying_price(selected_stock) or cached_chain["spot_price"]
@@ -567,7 +440,7 @@ if is_dhan_mode and st.session_state.dhan_provider:
         st.markdown(
             f"**Underlying Spot:** `{selected_stock}` @ **{spot_icon}₹{spot_price:.2f}** | "
             f"**Expiry:** `{expiry_date}` | **Source:** `DhanHQ Real Market Data` | "
-            f"**Live Ticks Ingested:** `{st.session_state.live_ticks_received:,}`"
+            f"**Live Ticks Ingested:** `{engine.live_ticks_received:,}`"
         )
 
         for item in cached_chain["strikes"]:
@@ -575,7 +448,6 @@ if is_dhan_mode and st.session_state.dhan_provider:
             ce_key = f"{selected_stock}_{expiry_date}_{strike:.0f}_CE"
             pe_key = f"{selected_stock}_{expiry_date}_{strike:.0f}_PE"
 
-            # Check if live WebSocket pushed updated ticks into state_manager
             ce_live = state_manager.get_latest(ce_key)
             pe_live = state_manager.get_latest(pe_key)
 
@@ -609,18 +481,18 @@ if is_dhan_mode and st.session_state.dhan_provider:
                 "PE OI": f"{pe_oi:,}",
             })
     else:
-        if st.session_state.dhan_provider and st.session_state.dhan_provider.last_error:
-            st.error(f"{st.session_state.dhan_provider.last_error}")
+        if engine.dhan_provider and engine.dhan_provider.last_error:
+            st.error(f"{engine.dhan_provider.last_error}")
         else:
             st.warning(f"Could not load option chain for {selected_stock} from Dhan API. Click '🔄 Refresh Data' to retry.")
 
 else:
     # Simulation Mode Table
-    dummy_p: DummyMarketDataProvider = st.session_state.dummy_provider
+    dummy_p = engine.dummy_provider
     underlying_price = state_manager.get_underlying_price(selected_stock) or dummy_p.spot_prices.get(selected_stock, 0.0)
     strikes = dummy_p.get_strikes_for_symbol(selected_stock)
 
-    st.markdown(f"**Underlying Spot:** `{selected_stock}` @ **₹{underlying_price:.2f}** | **Expiry:** `{dummy_p.expiry_date}` | **Source:** `Simulation Mode` | **Simulated Ticks:** `{st.session_state.update_count * 3780:,}`")
+    st.markdown(f"**Underlying Spot:** `{selected_stock}` @ **₹{underlying_price:.2f}** | **Expiry:** `{dummy_p.expiry_date}` | **Source:** `Simulation Mode` | **Simulated Ticks:** `{engine.update_count * 3780:,}`")
 
     for strike in strikes:
         ce_key = f"{selected_stock}_{dummy_p.expiry_date}_{strike:.0f}_CE"
@@ -662,9 +534,9 @@ if chain_rows:
 # Auto-stream loop
 # -------------------------------------------------------------------
 
-if st.session_state.auto_stream:
-    if is_dhan_mode and st.session_state.dhan_provider and st.session_state.dhan_provider.last_error:
-        st.session_state.auto_stream = False
+if engine.is_streaming_active:
+    if is_dhan_mode and engine.dhan_provider and engine.dhan_provider.last_error:
+        engine.stop_dhan_feed()
         st.rerun()
     else:
         time.sleep(refresh_speed)
