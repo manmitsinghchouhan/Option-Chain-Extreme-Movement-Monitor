@@ -4,8 +4,33 @@ import queue
 import sys
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta, time as dt_time
 from pathlib import Path
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def get_ist_now() -> datetime:
+    return datetime.now(IST)
+
+def check_market_session_ist() -> tuple[bool, str]:
+    """Check if Indian NSE Stock Exchange is actively open."""
+    now_ist = get_ist_now()
+    weekday = now_ist.weekday()  # 0=Monday, 4=Friday, 5=Saturday, 6=Sunday
+    current_time = now_ist.time()
+    
+    if weekday >= 5:
+        day_name = "Saturday" if weekday == 5 else "Sunday"
+        return False, f"Weekend ({day_name}) — NSE is Closed"
+    
+    open_time = dt_time(9, 15)
+    close_time = dt_time(15, 30)
+    
+    if current_time < open_time:
+        return False, f"Pre-Market (Opens at 9:15 AM IST, Current: {now_ist.strftime('%I:%M %p')} IST)"
+    elif current_time > close_time:
+        return False, f"Post-Market (Closed at 3:30 PM IST, Current: {now_ist.strftime('%I:%M %p')} IST)"
+    
+    return True, f"Live Trading Session ({now_ist.strftime('%I:%M %p')} IST)"
 
 # Ensure root directory is in sys.path for Streamlit Cloud and subdirectory runners
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -213,6 +238,8 @@ refresh_speed = st.sidebar.selectbox(
 # Header & Metrics
 # -------------------------------------------------------------------
 
+is_market_open, market_session_status = check_market_session_ist()
+
 total_contracts = len(all_symbols) * 18
 
 h_col1, h_col2 = st.columns([3, 1])
@@ -221,10 +248,18 @@ with h_col1:
     mode_text = "DhanHQ Live Real-Time Feed" if is_dhan_mode else "Offline Simulation Mode"
     st.caption(f"Scanner [{mode_text}] — Monitoring 210 F&O Stocks for -60%, -70%, -80% Down Spikes & Crashes")
 with h_col2:
-    if engine.is_streaming_active:
-        st.markdown('<div style="text-align: right; margin-top: 15px;"><span class="live-badge live-active">● STREAMING LIVE</span></div>', unsafe_allow_html=True)
+    if is_dhan_mode:
+        if not is_market_open:
+            st.markdown('<div style="text-align: right; margin-top: 15px;"><span class="live-badge live-paused">🌙 MARKET CLOSED</span></div>', unsafe_allow_html=True)
+        elif engine.is_streaming_active:
+            st.markdown('<div style="text-align: right; margin-top: 15px;"><span class="live-badge live-active">● STREAMING LIVE</span></div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div style="text-align: right; margin-top: 15px;"><span class="live-badge live-paused">⏸️ STREAM PAUSED</span></div>', unsafe_allow_html=True)
     else:
-        st.markdown('<div style="text-align: right; margin-top: 15px;"><span class="live-badge live-paused">⏸️ STREAM PAUSED</span></div>', unsafe_allow_html=True)
+        if engine.is_streaming_active:
+            st.markdown('<div style="text-align: right; margin-top: 15px;"><span class="live-badge live-active">● SIMULATION ACTIVE</span></div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div style="text-align: right; margin-top: 15px;"><span class="live-badge live-paused">⏸️ STREAM PAUSED</span></div>', unsafe_allow_html=True)
 
 col1, col2, col3, col4, col5 = st.columns(5)
 with col1:
@@ -240,9 +275,17 @@ with col5:
 
 st.divider()
 
-if is_dhan_mode and engine.dhan_provider and engine.dhan_provider.last_error:
-    st.error(f"🚨 **Authentication Error:** {engine.dhan_provider.last_error}")
-    st.info("💡 **Quick Fix:** 1. Generate a new token from [DhanHQ Portal](https://dhanhq.co/) ➔ 2. Paste in sidebar 'DhanHQ Credentials Updater' or update Secrets.")
+if is_dhan_mode:
+    if engine.dhan_provider and engine.dhan_provider.last_error:
+        st.error(f"🚨 **Authentication Error:** {engine.dhan_provider.last_error}")
+        st.info("💡 **Quick Fix:** 1. Generate a new token from [DhanHQ Portal](https://dhanhq.co/) ➔ 2. Paste in sidebar 'Daily Access Token Updater' or update Secrets.")
+    elif not is_market_open:
+        st.warning(
+            f"🌙 **NSE Market is Closed ({market_session_status})**\n\n"
+            f"• Trading hours: **Monday – Friday, 9:15 AM – 3:30 PM IST**.\n"
+            f"• Displaying the **last recorded closing market snapshot** and historical price data.\n"
+            f"• Live WebSocket tick stream and extreme alerts will resume automatically at **9:15 AM IST**."
+        )
 
 # -------------------------------------------------------------------
 # Streaming Controls
@@ -296,9 +339,6 @@ if engine.is_streaming_active and not is_dhan_mode:
     new_sim_alerts = engine.step_simulation()
     if new_sim_alerts:
         st.toast(f"🚨 {len(new_sim_alerts)} New Extreme Movement Alert(s) Detected!", icon="⚡")
-
-if is_dhan_mode and engine.is_streaming_active and engine.live_ticks_received == 0:
-    st.warning("🌙 **Market Currently Closed:** Connected to DhanHQ Live WebSocket, but NSE is currently closed (Trading hours: 9:15 AM - 3:30 PM IST). 0 live trade ticks received after hours.")
 
 # -------------------------------------------------------------------
 # Top Market Movers Bar (Real-Time Scanner)
@@ -552,18 +592,29 @@ else:
             "PE OI": f"{pe_oi:,}",
         })
 
+table_placeholder = st.empty()
 if chain_rows:
     df_chain = pd.DataFrame(chain_rows)
-    st.dataframe(df_chain, width='stretch', hide_index=True)
+    table_placeholder.dataframe(df_chain, width='stretch', hide_index=True)
+else:
+    table_placeholder.empty()
 
 # -------------------------------------------------------------------
 # Auto-stream loop
 # -------------------------------------------------------------------
 
 if engine.is_streaming_active:
-    if is_dhan_mode and engine.dhan_provider and engine.dhan_provider.last_error:
-        engine.stop_dhan_feed()
-        st.rerun()
+    if is_dhan_mode:
+        if engine.dhan_provider and engine.dhan_provider.last_error:
+            engine.stop_dhan_feed()
+            st.rerun()
+        elif not is_market_open:
+            # During market closed hours, keep display static without continuous 1s reload flickering
+            time.sleep(15)
+            st.rerun()
+        else:
+            time.sleep(refresh_speed)
+            st.rerun()
     else:
         time.sleep(refresh_speed)
         st.rerun()
