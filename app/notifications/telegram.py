@@ -5,6 +5,29 @@ import requests
 from app.detection.detector import ExtremeEvent
 
 
+def _get_secret(key: str) -> str | None:
+    """Retrieve secret from os.environ or streamlit secrets with case/nesting fallbacks."""
+    for k in (key, key.upper(), key.lower()):
+        val = os.getenv(k)
+        if val:
+            return str(val).strip()
+
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets"):
+            for k in (key, key.upper(), key.lower()):
+                if k in st.secrets:
+                    return str(st.secrets[k]).strip()
+            if "telegram" in st.secrets:
+                tg = st.secrets["telegram"]
+                sub_k = key.replace("TELEGRAM_", "").lower()
+                if sub_k in tg:
+                    return str(tg[sub_k]).strip()
+    except Exception:
+        pass
+    return None
+
+
 class TelegramNotifier:
     """Sends extreme movement notifications through Telegram."""
 
@@ -18,11 +41,11 @@ class TelegramNotifier:
 
     @property
     def bot_token(self) -> str | None:
-        return self._bot_token or os.getenv("TELEGRAM_BOT_TOKEN")
+        return self._bot_token or _get_secret("TELEGRAM_BOT_TOKEN")
 
     @property
     def chat_id(self) -> str | None:
-        return self._chat_id or os.getenv("TELEGRAM_CHAT_ID")
+        return self._chat_id or _get_secret("TELEGRAM_CHAT_ID")
 
     def is_configured(self) -> bool:
         """Return whether Telegram credentials are available."""

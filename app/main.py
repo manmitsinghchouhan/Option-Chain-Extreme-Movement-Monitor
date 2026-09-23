@@ -24,10 +24,16 @@ load_dotenv()
 try:
     if hasattr(st, "secrets"):
         for k, v in st.secrets.items():
-            k_upper = k.upper()
-            val_str = str(v).strip()
-            os.environ[k_upper] = val_str
-            os.environ[k] = val_str
+            if isinstance(v, dict) or "secrets" in str(type(v)).lower():
+                for sub_k, sub_v in v.items():
+                    sub_name = f"{k}_{sub_k}".upper()
+                    val = str(sub_v).strip().strip('"').strip("'")
+                    os.environ[sub_name] = val
+                    os.environ[sub_k.upper()] = val
+            else:
+                val = str(v).strip().strip('"').strip("'")
+                os.environ[k.upper()] = val
+                os.environ[k] = val
 except Exception:
     pass
 
@@ -177,18 +183,7 @@ if notifier.is_configured():
         except Exception as e:
             st.sidebar.error(f"Failed to send Telegram message: {e}")
 else:
-    st.sidebar.caption("📱 Telegram: Not configured")
-    with st.sidebar.expander("⚙️ Setup Telegram"):
-        t_tok = st.text_input("Telegram Bot Token", type="password", key="quick_t_tok")
-        t_chat = st.text_input("Telegram Chat / Group ID", key="quick_t_chat", help="e.g. -1001234567890")
-        if st.button("Connect Telegram", width='stretch', key="save_quick_telegram"):
-            if t_tok.strip() and t_chat.strip():
-                os.environ["TELEGRAM_BOT_TOKEN"] = t_tok.strip()
-                os.environ["TELEGRAM_CHAT_ID"] = t_chat.strip()
-                st.toast("✅ Telegram bot connected successfully!", icon="📱")
-                st.rerun()
-            else:
-                st.warning("Please enter both Bot Token and Chat ID.")
+    st.sidebar.caption("📱 Telegram: Not configured (add to Streamlit Secrets)")
 
 st.sidebar.markdown("---")
 refresh_speed = st.sidebar.selectbox(
