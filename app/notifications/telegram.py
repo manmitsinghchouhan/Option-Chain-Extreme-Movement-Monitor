@@ -5,24 +5,36 @@ import requests
 from app.detection.detector import ExtremeEvent
 
 
-def _get_secret(key: str) -> str | None:
-    """Retrieve secret from os.environ or streamlit secrets with case/nesting fallbacks."""
-    for k in (key, key.upper(), key.lower()):
-        val = os.getenv(k)
-        if val:
-            return str(val).strip()
+def _get_secret(*keys: str) -> str | None:
+    """Retrieve secret matching any of the candidate keys from os.environ or streamlit secrets."""
+    # 1. Check os.environ directly
+    for key in keys:
+        for k in (key, key.upper(), key.lower()):
+            val = os.getenv(k)
+            if val:
+                return str(val).strip().strip('"').strip("'")
 
+    # 2. Check streamlit secrets if available
     try:
         import streamlit as st
         if hasattr(st, "secrets"):
-            for k in (key, key.upper(), key.lower()):
-                if k in st.secrets:
-                    return str(st.secrets[k]).strip()
-            if "telegram" in st.secrets:
-                tg = st.secrets["telegram"]
-                sub_k = key.replace("TELEGRAM_", "").lower()
-                if sub_k in tg:
-                    return str(tg[sub_k]).strip()
+            # Direct key check
+            for key in keys:
+                for k in (key, key.upper(), key.lower()):
+                    if k in st.secrets:
+                        return str(st.secrets[k]).strip().strip('"').strip("'")
+
+            # Recursive / fuzzy search across all secrets entries
+            for s_key, s_val in st.secrets.items():
+                if isinstance(s_val, dict) or "secrets" in str(type(s_val)).lower():
+                    for sub_k, sub_v in s_val.items():
+                        for target in keys:
+                            if target.lower() == sub_k.lower() or target.lower() in f"{s_key}_{sub_k}".lower():
+                                return str(sub_v).strip().strip('"').strip("'")
+                else:
+                    for target in keys:
+                        if target.lower() == s_key.lower():
+                            return str(s_val).strip().strip('"').strip("'")
     except Exception:
         pass
     return None
@@ -41,11 +53,27 @@ class TelegramNotifier:
 
     @property
     def bot_token(self) -> str | None:
-        return self._bot_token or _get_secret("TELEGRAM_BOT_TOKEN")
+        return self._bot_token or _get_secret(
+            "TELEGRAM_BOT_TOKEN",
+            "TELEGRAM_BOT_ID",
+            "TELEGRAM_TOKEN",
+            "BOT_TOKEN",
+            "BOT_ID",
+            "TG_BOT_TOKEN",
+            "TG_TOKEN",
+        )
 
     @property
     def chat_id(self) -> str | None:
-        return self._chat_id or _get_secret("TELEGRAM_CHAT_ID")
+        return self._chat_id or _get_secret(
+            "TELEGRAM_CHAT_ID",
+            "TELEGRAM_CHATID",
+            "TELEGRAM_GROUP_ID",
+            "CHAT_ID",
+            "CHATID",
+            "GROUP_ID",
+            "TG_CHAT_ID",
+        )
 
     def is_configured(self) -> bool:
         """Return whether Telegram credentials are available."""
