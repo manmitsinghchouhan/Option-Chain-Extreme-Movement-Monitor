@@ -21,6 +21,13 @@ from app.state.manager import StateManager
 from app.stocks import get_symbols
 
 load_dotenv()
+try:
+    if hasattr(st, "secrets"):
+        for k, v in st.secrets.items():
+            if isinstance(v, str) and k not in os.environ:
+                os.environ[k] = v
+except Exception:
+    pass
 
 st.set_page_config(
     page_title="F&O Option Chain Extreme Movement Monitor",
@@ -167,11 +174,26 @@ st.sidebar.subheader("🔌 Connection Status")
 if is_dhan_mode:
     if st.session_state.dhan_provider and st.session_state.dhan_provider.last_error:
         st.sidebar.error("🔑 DhanHQ Token Expired / Invalid")
-        st.sidebar.caption("Please generate a new access token from [dhanhq.co](https://dhanhq.co/) and update your `.env` file.")
+        st.sidebar.caption("Please generate a new access token from [dhanhq.co](https://dhanhq.co/) and update your `.env` file or use the box below.")
     else:
         st.sidebar.success("🟢 DhanHQ v2 API: Authenticated")
         st.sidebar.info(f"📊 F&O Universe: {len(all_symbols)} Stocks")
         st.sidebar.caption("⚡ Live WebSocket: wss://api-feed.dhan.co")
+
+    with st.sidebar.expander("🔑 Daily Token Updater"):
+        new_token_input = st.text_input("New Dhan Access Token", type="password", key="daily_token_input", help="Paste today's token from dhanhq.co")
+        if st.button("Apply Token", width='stretch', key="apply_daily_token"):
+            if new_token_input.strip():
+                clean_tok = new_token_input.strip()
+                os.environ["DHAN_ACCESS_TOKEN"] = clean_tok
+                if st.session_state.dhan_provider:
+                    st.session_state.dhan_provider.access_token = clean_tok
+                    st.session_state.dhan_provider.last_error = None
+                    if st.session_state.dhan_provider._running:
+                        st.session_state.dhan_provider.stop()
+                st.session_state.cached_real_chains = {}
+                st.toast("✅ Access token updated! Reconnecting...", icon="🔑")
+                st.rerun()
 else:
     st.sidebar.info("🔘 Simulation Mode: Active (Brownian Motion)")
 
