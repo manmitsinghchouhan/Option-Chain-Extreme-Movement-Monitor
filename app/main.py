@@ -24,8 +24,10 @@ load_dotenv()
 try:
     if hasattr(st, "secrets"):
         for k, v in st.secrets.items():
-            if isinstance(v, str) and k not in os.environ:
-                os.environ[k] = v
+            k_upper = k.upper()
+            val_str = str(v).strip()
+            os.environ[k_upper] = val_str
+            os.environ[k] = val_str
 except Exception:
     pass
 
@@ -146,19 +148,22 @@ if is_dhan_mode:
         st.sidebar.info(f"📊 F&O Universe: {len(all_symbols)} Stocks")
         st.sidebar.caption("⚡ Live WebSocket: wss://api-feed.dhan.co")
 
-    with st.sidebar.expander("🔑 DhanHQ Credentials Updater"):
-        curr_client_id = os.getenv("DHAN_CLIENT_ID", "")
-        new_client_id = st.text_input("Dhan Client ID", value=curr_client_id, key="daily_client_id_input")
-        new_token_input = st.text_input("Dhan Access Token", type="password", key="daily_token_input", help="Paste access token from dhanhq.co")
+    with st.sidebar.expander("🔑 Daily Access Token Updater"):
+        new_token_input = st.text_input("Dhan Access Token", type="password", key="daily_token_input", help="Paste today's access token from dhanhq.co")
+        cid_needed = not bool(os.getenv("DHAN_CLIENT_ID"))
+        new_cid_input = ""
+        if cid_needed:
+            new_cid_input = st.text_input("Dhan Client ID", type="password", key="daily_client_id_input", help="Enter Dhan Client ID (only needed once)")
+        
         if st.button("Apply & Connect", width='stretch', key="apply_daily_token"):
-            cid = new_client_id.strip() if new_client_id.strip() else curr_client_id
             tok = new_token_input.strip()
-            if cid and tok:
+            cid = new_cid_input.strip() if cid_needed else os.getenv("DHAN_CLIENT_ID", "")
+            if tok and cid:
                 engine.update_dhan_credentials(cid, tok)
                 st.toast("✅ DhanHQ credentials updated! Reconnecting...", icon="🔑")
                 st.rerun()
             else:
-                st.warning("Please enter both Client ID and Access Token.")
+                st.warning("Please enter your Access Token.")
 else:
     st.sidebar.info("🔘 Simulation Mode: Active (Brownian Motion)")
 
@@ -172,7 +177,18 @@ if notifier.is_configured():
         except Exception as e:
             st.sidebar.error(f"Failed to send Telegram message: {e}")
 else:
-    st.sidebar.caption("📱 Telegram: Not configured (add to Secrets or .env)")
+    st.sidebar.caption("📱 Telegram: Not configured")
+    with st.sidebar.expander("⚙️ Setup Telegram"):
+        t_tok = st.text_input("Telegram Bot Token", type="password", key="quick_t_tok")
+        t_chat = st.text_input("Telegram Chat / Group ID", key="quick_t_chat", help="e.g. -1001234567890")
+        if st.button("Connect Telegram", width='stretch', key="save_quick_telegram"):
+            if t_tok.strip() and t_chat.strip():
+                os.environ["TELEGRAM_BOT_TOKEN"] = t_tok.strip()
+                os.environ["TELEGRAM_CHAT_ID"] = t_chat.strip()
+                st.toast("✅ Telegram bot connected successfully!", icon="📱")
+                st.rerun()
+            else:
+                st.warning("Please enter both Bot Token and Chat ID.")
 
 st.sidebar.markdown("---")
 refresh_speed = st.sidebar.selectbox(

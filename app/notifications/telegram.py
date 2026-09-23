@@ -13,12 +13,19 @@ class TelegramNotifier:
         bot_token: str | None = None,
         chat_id: str | None = None,
     ) -> None:
-        self.bot_token = bot_token or os.getenv("TELEGRAM_BOT_TOKEN")
-        self.chat_id = chat_id or os.getenv("TELEGRAM_CHAT_ID")
+        self._bot_token = bot_token
+        self._chat_id = chat_id
+
+    @property
+    def bot_token(self) -> str | None:
+        return self._bot_token or os.getenv("TELEGRAM_BOT_TOKEN")
+
+    @property
+    def chat_id(self) -> str | None:
+        return self._chat_id or os.getenv("TELEGRAM_CHAT_ID")
 
     def is_configured(self) -> bool:
         """Return whether Telegram credentials are available."""
-
         return bool(self.bot_token and self.chat_id)
 
     def format_message(self, event: ExtremeEvent) -> str:
