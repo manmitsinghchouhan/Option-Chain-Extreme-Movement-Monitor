@@ -22,19 +22,24 @@ def _get_secret(*keys: str) -> str | None:
             for key in keys:
                 for k in (key, key.upper(), key.lower()):
                     if k in st.secrets:
-                        return str(st.secrets[k]).strip().strip('"').strip("'")
+                        val = st.secrets[k]
+                        if val:
+                            return str(val).strip().strip('"').strip("'")
 
-            # Recursive / fuzzy search across all secrets entries
-            for s_key, s_val in st.secrets.items():
+            # Recursive / case-insensitive search across all secrets entries
+            for s_key in list(st.secrets.keys()):
+                s_val = st.secrets[s_key]
                 if isinstance(s_val, dict) or "secrets" in str(type(s_val)).lower():
                     for sub_k, sub_v in s_val.items():
                         for target in keys:
                             if target.lower() == sub_k.lower() or target.lower() in f"{s_key}_{sub_k}".lower():
-                                return str(sub_v).strip().strip('"').strip("'")
+                                if sub_v:
+                                    return str(sub_v).strip().strip('"').strip("'")
                 else:
                     for target in keys:
                         if target.lower() == s_key.lower():
-                            return str(s_val).strip().strip('"').strip("'")
+                            if s_val:
+                                return str(s_val).strip().strip('"').strip("'")
     except Exception:
         pass
     return None

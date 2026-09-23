@@ -20,22 +20,32 @@ from app.data.models import MarketTick, OptionTick, OptionType
 from app.engine import MonitorEngine
 from app.stocks import get_symbols
 
-load_dotenv()
-try:
-    if hasattr(st, "secrets"):
-        for k, v in st.secrets.items():
-            if isinstance(v, dict) or "secrets" in str(type(v)).lower():
-                for sub_k, sub_v in v.items():
-                    sub_name = f"{k}_{sub_k}".upper()
-                    val = str(sub_v).strip().strip('"').strip("'")
-                    os.environ[sub_name] = val
-                    os.environ[sub_k.upper()] = val
-            else:
-                val = str(v).strip().strip('"').strip("'")
-                os.environ[k.upper()] = val
-                os.environ[k] = val
-except Exception:
-    pass
+def sync_secrets_to_env() -> list[str]:
+    """Sync all Streamlit cloud secrets and .env keys into os.environ."""
+    load_dotenv(override=True)
+    detected_keys = []
+    try:
+        if hasattr(st, "secrets"):
+            for k in list(st.secrets.keys()):
+                v = st.secrets[k]
+                if isinstance(v, dict) or "secrets" in str(type(v)).lower():
+                    for sub_k, sub_v in v.items():
+                        sub_name = f"{k}_{sub_k}".upper()
+                        val = str(sub_v).strip().strip('"').strip("'")
+                        os.environ[sub_name] = val
+                        os.environ[sub_k.upper()] = val
+                        detected_keys.append(f"{k}.{sub_k}")
+                else:
+                    val = str(v).strip().strip('"').strip("'")
+                    os.environ[k.upper()] = val
+                    os.environ[k] = val
+                    detected_keys.append(k)
+    except Exception:
+        pass
+    return detected_keys
+
+
+detected_secret_keys = sync_secrets_to_env()
 
 st.set_page_config(
     page_title="F&O Option Chain Extreme Movement Monitor",
@@ -184,6 +194,11 @@ if notifier.is_configured():
             st.sidebar.error(f"Failed to send Telegram message: {e}")
 else:
     st.sidebar.caption("📱 Telegram: Not configured (add to Streamlit Secrets)")
+    if st.sidebar.button("🔄 Reload Cloud Secrets", width='stretch', help="Click to reload secrets from Streamlit settings without rebooting"):
+        sync_secrets_to_env()
+        st.cache_resource.clear()
+        st.toast("🔄 Cloud secrets reloaded!", icon="🔑")
+        st.rerun()
 
 st.sidebar.markdown("---")
 refresh_speed = st.sidebar.selectbox(
