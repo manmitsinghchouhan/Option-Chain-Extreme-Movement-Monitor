@@ -51,6 +51,8 @@ class ExtremeDetector:
     def __init__(
         self,
         thresholds: tuple[float, ...] = DEFAULT_THRESHOLDS,
+        allow_up: bool = False,
+        allow_down: bool = True,
     ) -> None:
         if not thresholds:
             raise ValueError("At least one threshold is required.")
@@ -59,6 +61,8 @@ class ExtremeDetector:
             raise ValueError("Thresholds must be greater than zero.")
 
         self.thresholds = tuple(sorted(set(thresholds)))
+        self.allow_up = allow_up
+        self.allow_down = allow_down
 
     def detect(
         self,
@@ -74,7 +78,7 @@ class ExtremeDetector:
         Detect every configured threshold crossed by the movement.
 
         Example:
-            +80% movement -> +60%, +70%, +80%
+            -80% movement -> -60%, -70%, -80%
         """
 
         percentage = movement.percentage_change
@@ -83,6 +87,8 @@ class ExtremeDetector:
             return []
 
         if percentage > 0:
+            if not self.allow_up:
+                return []
             direction = MovementDirection.UP
             crossed_thresholds = [
                 threshold
@@ -90,6 +96,8 @@ class ExtremeDetector:
                 if percentage >= threshold
             ]
         else:
+            if not self.allow_down:
+                return []
             direction = MovementDirection.DOWN
             absolute_percentage = abs(percentage)
             crossed_thresholds = [

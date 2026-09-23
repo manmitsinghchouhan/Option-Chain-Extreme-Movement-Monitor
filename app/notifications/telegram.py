@@ -88,3 +88,26 @@ class TelegramNotifier:
         response.raise_for_status()
 
         return bool(response.json().get("ok"))
+
+    def send_test_message(self) -> bool:
+        """Send a test ping message to verify Telegram bot setup."""
+        if not self.is_configured():
+            raise RuntimeError("Telegram credentials missing in .env")
+
+        url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+        response = requests.post(
+            url,
+            json={
+                "chat_id": self.chat_id,
+                "text": (
+                    "⚡ <b>F&O Extreme Movement Monitor</b>\n\n"
+                    "✅ <b>Telegram Bot Connected Successfully!</b>\n"
+                    "Your system is configured to receive real-time alerts for "
+                    "-60%, -70%, and -80% option premium crashes."
+                ),
+                "parse_mode": "HTML",
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        return bool(response.json().get("ok"))

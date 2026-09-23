@@ -191,10 +191,10 @@ class DummyMarketDataProvider(MarketDataProvider):
             self.premiums[key] = new_premium
             return new_premium
 
-        # 2. Check for controlled demo test symbol (e.g. RELIANCE CE surge / PE plunge)
+        # 2. Check for controlled demo test symbol (e.g. RELIANCE CE / PE plunge)
         if symbol == self.extreme_test_symbol and opt_type == OptionType.CE:
             base = self.extreme_starting_premiums.get(key, current_premium)
-            levels = [1.0, 1.15, 1.35, 1.62, 1.74, 1.85, 1.90]
+            levels = [1.0, 0.85, 0.65, 0.38, 0.28, 0.18, 0.10]
             step_idx = min(self._extreme_step, len(levels) - 1)
             new_premium = round(max(base * levels[step_idx], 0.05), 2)
             self.premiums[key] = new_premium
@@ -216,7 +216,7 @@ class DummyMarketDataProvider(MarketDataProvider):
         if self.enable_random_spikes and self._extreme_step > 0 and self._extreme_step % 3 == 0:
             if random.random() < 0.85:
                 random_stock = random.choice(self.symbols)
-                random_pct = random.choice([65.0, 72.0, 82.0, -68.0, -78.0])
+                random_pct = random.choice([-65.0, -72.0, -78.0, -82.0, -88.0])
                 self.inject_extreme_spike(symbol=random_stock, percentage_change=random_pct)
 
         for symbol in self.symbols:

@@ -71,7 +71,7 @@ def test_state_manager_stores_option_contracts():
 
 
 def test_option_extreme_detection_up_and_down():
-    detector = ExtremeDetector(thresholds=(60.0, 70.0, 80.0))
+    detector = ExtremeDetector(thresholds=(60.0, 70.0, 80.0), allow_up=True)
     now = datetime.now()
 
     # Call Option surge: 20.0 -> 35.0 (+75%)
@@ -122,7 +122,7 @@ def test_option_extreme_detection_up_and_down():
 
 
 def test_alert_manager_deduplicates_by_instrument():
-    detector = ExtremeDetector(thresholds=(60.0, 70.0, 80.0))
+    detector = ExtremeDetector(thresholds=(60.0, 70.0, 80.0), allow_up=True)
     alert_mgr = AlertManager()
     now = datetime.now()
 

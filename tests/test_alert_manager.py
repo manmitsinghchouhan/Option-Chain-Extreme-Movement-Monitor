@@ -91,11 +91,31 @@ def test_threshold_can_be_reactivated():
 def test_clear_removes_all_active_events():
     manager = AlertManager()
 
-    manager.process(make_event( threshold=60.0))
-    manager.process(make_event( threshold=70.0))
+    manager.process(make_event(threshold=60.0))
+    manager.process(make_event(threshold=70.0))
 
     assert manager.active_count() == 2
 
     manager.clear()
 
     assert manager.active_count() == 0
+
+
+def test_sync_resets_automatically_reactivates_threshold():
+    manager = AlertManager()
+    event_60 = make_event(threshold=60.0, direction=MovementDirection.UP)
+
+    # 1. Price jumps to +65% -> Triggers 60% UP alert
+    assert manager.process(event_60) is True
+    # Duplicate tick while still at +65% -> No repeat alert
+    assert manager.process(event_60) is False
+
+    # 2. Price cools down back to +45% (below 60%)
+    manager.sync_resets(
+        instrument_key="RELIANCE",
+        percentage_change=45.0,
+        thresholds=(60.0, 70.0, 80.0),
+    )
+
+    # 3. Price surges again to +65% -> Triggers NEW alert!
+    assert manager.process(event_60) is True

@@ -65,6 +65,26 @@ class AlertManager:
 
         self._active.discard(key)
 
+    def sync_resets(
+        self,
+        instrument_key: str,
+        percentage_change: float,
+        thresholds: tuple[float, ...] = (60.0, 70.0, 80.0),
+    ) -> None:
+        """
+        Automatically reset active thresholds if the percentage change
+        retreats below that threshold level.
+        """
+        for threshold in thresholds:
+            # If current gain is less than threshold, reset UP trigger
+            if percentage_change < threshold:
+                self._active.discard(AlertKey(instrument_key, "UP", threshold))
+
+            # If current loss is less than threshold (e.g. -40% > -60%), reset DOWN trigger
+            if percentage_change > -threshold:
+                self._active.discard(AlertKey(instrument_key, "DOWN", threshold))
+
+
 
     def clear(self) -> None:
         """Clear all active alert states."""

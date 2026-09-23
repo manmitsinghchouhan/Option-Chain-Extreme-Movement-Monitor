@@ -20,46 +20,6 @@ def make_movement(percentage: float) -> MovementResult:
     )
 
 
-def test_below_60_percent_creates_no_event():
-    detector = ExtremeDetector()
-
-    events = detector.detect(
-        "RELIANCE",
-        make_movement(59.9),
-    )
-
-    assert events == []
-
-
-def test_exactly_60_percent_creates_60_event():
-    detector = ExtremeDetector()
-
-    events = detector.detect(
-        "RELIANCE",
-        make_movement(60.0),
-    )
-
-    assert len(events) == 1
-    assert events[0].threshold == 60.0
-    assert events[0].direction == MovementDirection.UP
-
-
-def test_80_percent_up_movement_crosses_three_thresholds():
-    detector = ExtremeDetector()
-
-    events = detector.detect(
-        "RELIANCE",
-        make_movement(80.0),
-    )
-
-    assert len(events) == 3
-    assert [event.threshold for event in events] == [
-        60.0,
-        70.0,
-        80.0,
-    ]
-
-
 def test_below_negative_60_percent_creates_no_event():
     detector = ExtremeDetector()
 
@@ -100,21 +60,27 @@ def test_negative_80_percent_crosses_three_thresholds():
     ]
 
 
-def test_positive_and_negative_direction_are_distinct():
+def test_up_movement_ignored_by_default():
     detector = ExtremeDetector()
 
-    up_events = detector.detect(
+    events = detector.detect(
         "RELIANCE",
-        make_movement(70.0),
+        make_movement(80.0),
     )
 
-    down_events = detector.detect(
+    assert events == []
+
+
+def test_up_movement_detected_when_allow_up_enabled():
+    detector = ExtremeDetector(allow_up=True)
+
+    events = detector.detect(
         "RELIANCE",
-        make_movement(-70.0),
+        make_movement(80.0),
     )
 
-    assert up_events[0].direction == MovementDirection.UP
-    assert down_events[0].direction == MovementDirection.DOWN
+    assert len(events) == 3
+    assert events[0].direction == MovementDirection.UP
 
 
 def test_custom_thresholds():
@@ -124,7 +90,7 @@ def test_custom_thresholds():
 
     events = detector.detect(
         "RELIANCE",
-        make_movement(80.0),
+        make_movement(-80.0),
     )
 
     assert [event.threshold for event in events] == [
