@@ -1,9 +1,16 @@
 import asyncio
 import os
 import queue
+import sys
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
+
+# Ensure root directory is in sys.path for Streamlit Cloud and subdirectory runners
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 import pandas as pd
 import streamlit as st
