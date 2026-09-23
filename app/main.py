@@ -146,10 +146,7 @@ if "dummy_provider" not in st.session_state:
     )
 
 if "dhan_provider" not in st.session_state:
-    try:
-        st.session_state.dhan_provider = DhanMarketDataProvider(strikes_above_below=6)
-    except Exception:
-        st.session_state.dhan_provider = None
+    st.session_state.dhan_provider = DhanMarketDataProvider(strikes_above_below=6)
 
 state_manager: StateManager = st.session_state.state_manager
 detector: ExtremeDetector = st.session_state.detector
@@ -163,16 +160,15 @@ all_symbols = get_symbols()
 
 st.sidebar.title("⚙️ System Settings")
 
-dhan_available = st.session_state.dhan_provider is not None
 provider_options = [
     "🟢 DhanHQ Live WebSocket (210 F&O Stocks)",
     "🔘 Simulation Mode (3,780 Dummy Option Contracts)",
-] if dhan_available else ["🔘 Simulation Mode (3,780 Dummy Option Contracts)"]
+]
 
 selected_provider_mode = st.sidebar.selectbox(
     "Data Source Mode",
     provider_options,
-    index=0 if dhan_available else 0,
+    index=0,
 )
 is_dhan_mode = "DhanHQ" in selected_provider_mode
 
@@ -180,27 +176,36 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("🔌 Connection Status")
 if is_dhan_mode:
     if st.session_state.dhan_provider and st.session_state.dhan_provider.last_error:
-        st.sidebar.error("🔑 DhanHQ Token Expired / Invalid")
-        st.sidebar.caption("Please generate a new access token from [dhanhq.co](https://dhanhq.co/) and update your `.env` file or use the box below.")
+        st.sidebar.error(st.session_state.dhan_provider.last_error)
+        st.sidebar.caption("Provide your Dhan Client ID & Access Token below or in Streamlit Cloud Secrets.")
     else:
         st.sidebar.success("🟢 DhanHQ v2 API: Authenticated")
         st.sidebar.info(f"📊 F&O Universe: {len(all_symbols)} Stocks")
         st.sidebar.caption("⚡ Live WebSocket: wss://api-feed.dhan.co")
 
-    with st.sidebar.expander("🔑 Daily Token Updater"):
-        new_token_input = st.text_input("New Dhan Access Token", type="password", key="daily_token_input", help="Paste today's token from dhanhq.co")
-        if st.button("Apply Token", width='stretch', key="apply_daily_token"):
+    with st.sidebar.expander("🔑 DhanHQ Credentials Updater"):
+        curr_client_id = os.getenv("DHAN_CLIENT_ID", "")
+        new_client_id = st.text_input("Dhan Client ID", value=curr_client_id, key="daily_client_id_input")
+        new_token_input = st.text_input("Dhan Access Token", type="password", key="daily_token_input", help="Paste access token from dhanhq.co")
+        if st.button("Apply & Connect", width='stretch', key="apply_daily_token"):
+            if new_client_id.strip():
+                os.environ["DHAN_CLIENT_ID"] = new_client_id.strip()
+                if st.session_state.dhan_provider:
+                    st.session_state.dhan_provider.client_id = new_client_id.strip()
             if new_token_input.strip():
                 clean_tok = new_token_input.strip()
                 os.environ["DHAN_ACCESS_TOKEN"] = clean_tok
                 if st.session_state.dhan_provider:
                     st.session_state.dhan_provider.access_token = clean_tok
-                    st.session_state.dhan_provider.last_error = None
-                    if st.session_state.dhan_provider._running:
-                        st.session_state.dhan_provider.stop()
+            if st.session_state.dhan_provider and st.session_state.dhan_provider.client_id and st.session_state.dhan_provider.access_token:
+                st.session_state.dhan_provider.last_error = None
+                if st.session_state.dhan_provider._running:
+                    st.session_state.dhan_provider.stop()
                 st.session_state.cached_real_chains = {}
-                st.toast("✅ Access token updated! Reconnecting...", icon="🔑")
+                st.toast("✅ DhanHQ credentials updated! Reconnecting...", icon="🔑")
                 st.rerun()
+            else:
+                st.warning("Please enter both Client ID and Access Token.")
 else:
     st.sidebar.info("🔘 Simulation Mode: Active (Brownian Motion)")
 
@@ -214,7 +219,7 @@ if notifier.is_configured():
         except Exception as e:
             st.sidebar.error(f"Failed to send Telegram message: {e}")
 else:
-    st.sidebar.caption("📱 Telegram: Not configured (add to .env to enable)")
+    st.sidebar.caption("📱 Telegram: Not configured (add to Secrets or .env)")
 
 st.sidebar.markdown("---")
 refresh_speed = st.sidebar.selectbox(

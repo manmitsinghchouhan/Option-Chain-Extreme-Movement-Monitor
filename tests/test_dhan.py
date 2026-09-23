@@ -73,10 +73,11 @@ class TestDhanMarketDataProvider(unittest.TestCase):
             "trading_symbol": "RELIANCE-Oct2026-2800-CE",
         }
 
-    def test_missing_credentials_raises(self):
+    def test_missing_credentials_sets_error(self):
         with patch.dict("os.environ", {}, clear=True):
-            with self.assertRaises(ValueError):
-                DhanMarketDataProvider(client_id="", access_token="")
+            p = DhanMarketDataProvider(client_id="", access_token="")
+            self.assertIsNotNone(p.last_error)
+            self.assertIn("missing", p.last_error.lower())
 
     def test_handle_quote_packet(self):
         mock_queue = MagicMock()

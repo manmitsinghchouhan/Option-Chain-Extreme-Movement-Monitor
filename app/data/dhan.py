@@ -30,14 +30,8 @@ class DhanMarketDataProvider(MarketDataProvider):
         access_token: Optional[str] = None,
         strikes_above_below: int = 6,
     ) -> None:
-        self.client_id = client_id or os.getenv("DHAN_CLIENT_ID")
-        self.access_token = access_token or os.getenv("DHAN_ACCESS_TOKEN")
-
-        if not self.client_id or not self.access_token:
-            raise ValueError(
-                "DhanHQ credentials missing. Please provide DHAN_CLIENT_ID and "
-                "DHAN_ACCESS_TOKEN in .env or pass them to DhanMarketDataProvider."
-            )
+        self.client_id = client_id or os.getenv("DHAN_CLIENT_ID", "")
+        self.access_token = access_token or os.getenv("DHAN_ACCESS_TOKEN", "")
 
         self.strikes_above_below = strikes_above_below
         self.scrip_master = DhanScripMaster()
@@ -49,6 +43,9 @@ class DhanMarketDataProvider(MarketDataProvider):
         self._cached_oi: dict[int, int] = {}
         self._cached_spot: dict[str, float] = {}
         self.last_error: Optional[str] = None
+
+        if not self.client_id or not self.access_token:
+            self.last_error = "🔑 DhanHQ credentials missing. Please set DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN in Secrets or sidebar."
 
     def _handle_message(self, instance, packet: dict) -> None:
         """Callback invoked by MarketFeed background thread on every tick."""
