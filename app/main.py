@@ -608,11 +608,7 @@ if engine.is_streaming_active:
         if engine.dhan_provider and engine.dhan_provider.last_error:
             engine.stop_dhan_feed()
             st.rerun()
-        elif not is_market_open:
-            # During market closed hours, keep display static without continuous 1s reload flickering
-            time.sleep(15)
-            st.rerun()
-        else:
+        elif is_market_open:
             time.sleep(refresh_speed)
             st.rerun()
     else:

@@ -402,12 +402,13 @@ class DhanMarketDataProvider(MarketDataProvider):
         logger.info("DhanHQ Live WebSocket background thread started safely.")
 
     def stop(self) -> None:
-        """Disconnect and stop live stream feed."""
+        """Disconnect and stop live stream feed safely."""
         self._running = False
-        if self._feed:
+        feed_to_close = self._feed
+        self._feed = None
+        if feed_to_close:
             try:
-                self._feed.close_connection()
+                feed_to_close.close_connection()
             except Exception as e:
                 logger.warning("Error closing Dhan feed: %s", e)
-            self._feed = None
         logger.info("DhanMarketDataProvider stopped.")

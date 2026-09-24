@@ -99,6 +99,7 @@ class MonitorEngine:
         """Start background DhanHQ WebSocket streaming."""
         with self.lock:
             self.is_streaming_active = True
+            self.dhan_provider.last_error = None
             if not self.dhan_provider._running:
                 self.dhan_provider.start_background_feed(on_tick_callback=self.process_tick)
 
@@ -122,7 +123,11 @@ class MonitorEngine:
             self.dhan_provider.last_error = None
             if self.dhan_provider._running:
                 self.dhan_provider.stop()
+            
+            # If streaming is enabled, immediately launch the new feed with fresh token!
+            if self.is_streaming_active:
                 self.dhan_provider.start_background_feed(on_tick_callback=self.process_tick)
+
             self.cached_real_chains.clear()
 
     def step_simulation(self) -> list[ExtremeEvent]:
