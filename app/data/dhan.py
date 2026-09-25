@@ -205,7 +205,7 @@ class DhanMarketDataProvider(MarketDataProvider):
             self.last_error = None
 
             raw_data = chain_res.get("data", {}).get("data", {})
-            spot_price = float(raw_data.get("last_price", 0.0))
+            spot_price = float(raw_data.get("last_price", 0.0) or 0.0)
             raw_oc = raw_data.get("oc", {})
 
             strikes_data = []
@@ -230,7 +230,21 @@ class DhanMarketDataProvider(MarketDataProvider):
 
             strikes_data.sort(key=lambda x: x["strike"])
 
-            # Filter strikes around ATM (closest to spot price) if spot_price is known
+            # Fallback for spot price when market is closed or after-hours
+            if spot_price <= 0:
+                spot_price = float(self._cached_spot.get(symbol, 0.0))
+
+            if spot_price <= 0 and strikes_data:
+                active_strikes = [
+                    s["strike"] for s in strikes_data
+                    if (s["ce_ltp"] > 0 or s["pe_ltp"] > 0 or s["ce_prev_close"] > 0 or s["ce_oi"] > 0 or s["pe_oi"] > 0)
+                ]
+                if active_strikes:
+                    spot_price = active_strikes[len(active_strikes) // 2]
+                else:
+                    spot_price = strikes_data[len(strikes_data) // 2]["strike"]
+
+            # Filter strikes around ATM (closest to spot price)
             if spot_price > 0 and strikes_data:
                 closest_strike = min(strikes_data, key=lambda x: abs(x["strike"] - spot_price))["strike"]
                 closest_idx = [i for i, x in enumerate(strikes_data) if x["strike"] == closest_strike][0]

@@ -26,6 +26,18 @@ class MonitorEngine:
     - Synchronized live alert state across all connected devices (laptop/mobile)
     """
 
+    _instance: Optional["MonitorEngine"] = None
+    _singleton_lock: threading.Lock = threading.Lock()
+
+    @classmethod
+    def get_instance(cls) -> "MonitorEngine":
+        """Get or create the global singleton engine instance safely without inspect.getsource."""
+        if cls._instance is None:
+            with cls._singleton_lock:
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
+
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.state_manager = StateManager(window_minutes=60)

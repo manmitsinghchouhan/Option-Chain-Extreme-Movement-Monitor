@@ -147,13 +147,7 @@ st.markdown(
 )
 
 
-@st.cache_resource
-def get_monitor_engine() -> MonitorEngine:
-    """Create a single, server-wide shared MonitorEngine instance."""
-    return MonitorEngine()
-
-
-engine = get_monitor_engine()
+engine = MonitorEngine.get_instance()
 state_manager = engine.state_manager
 detector = engine.detector
 alert_manager = engine.alert_manager

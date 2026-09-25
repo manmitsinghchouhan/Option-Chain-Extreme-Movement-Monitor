@@ -1,8 +1,14 @@
+import logging
 import os
+import queue
+import threading
+import time
 
 import requests
 
 from app.detection.detector import ExtremeEvent
+
+logger = logging.getLogger(__name__)
 
 
 def _get_secret(*keys: str) -> str | None:
@@ -18,7 +24,6 @@ def _get_secret(*keys: str) -> str | None:
     try:
         import streamlit as st
         if hasattr(st, "secrets"):
-            # Direct key check
             for key in keys:
                 for k in (key, key.upper(), key.lower()):
                     if k in st.secrets:
@@ -26,7 +31,6 @@ def _get_secret(*keys: str) -> str | None:
                         if val:
                             return str(val).strip().strip('"').strip("'")
 
-            # Recursive / case-insensitive search across all secrets entries
             for s_key in list(st.secrets.keys()):
                 s_val = st.secrets[s_key]
                 if isinstance(s_val, dict) or "secrets" in str(type(s_val)).lower():
@@ -46,7 +50,7 @@ def _get_secret(*keys: str) -> str | None:
 
 
 class TelegramNotifier:
-    """Sends extreme movement notifications through Telegram."""
+    """Sends extreme movement notifications through Telegram with background rate-limiting."""
 
     def __init__(
         self,
@@ -55,6 +59,9 @@ class TelegramNotifier:
     ) -> None:
         self._bot_token = bot_token
         self._chat_id = chat_id
+        self._msg_queue: queue.Queue = queue.Queue(maxsize=500)
+        self._worker_thread = threading.Thread(target=self._dispatch_loop, daemon=True)
+        self._worker_thread.start()
 
     @property
     def bot_token(self) -> str | None:
@@ -84,14 +91,27 @@ class TelegramNotifier:
         """Return whether Telegram credentials are available."""
         return bool(self.bot_token and self.chat_id)
 
+    def _dispatch_loop(self) -> None:
+        """Background worker that drains queue and sends alerts respecting rate limits."""
+        while True:
+            try:
+                event = self._msg_queue.get()
+                if event is None:
+                    break
+                if self.is_configured():
+                    self._send_immediate(event)
+                time.sleep(1.2)  # Max 1 message per 1.2s to strictly respect Telegram rate limits
+            except Exception as e:
+                logger.error("Error in Telegram dispatch worker: %s", e)
+                time.sleep(2.0)
+
     def format_message(self, event: ExtremeEvent) -> str:
         """Create a human-readable Telegram message for stock or option alerts."""
-
         direction_symbol = "🟢" if event.direction.value == "UP" else "🔴"
         duration_minutes = event.duration_seconds / 60
 
         if event.is_option and event.option_type is not None:
-            title = f"🚨 EXTREME OPTION MOVEMENT DETECTED"
+            title = "🚨 EXTREME OPTION MOVEMENT DETECTED"
             contract_info = (
                 f"📊 Contract: {event.symbol} {event.strike_price:.0f} {event.option_type.value}\n"
                 f"🏷️ Type: {'CALL (CE)' if event.option_type.value == 'CE' else 'PUT (PE)'}\n"
@@ -101,12 +121,11 @@ class TelegramNotifier:
             if event.underlying_price > 0:
                 contract_info += f"📈 Underlying Spot: ₹{event.underlying_price:.2f}\n"
         else:
-            title = f"🚨 EXTREME MOVEMENT DETECTED"
+            title = "🚨 EXTREME MOVEMENT DETECTED"
             contract_info = (
                 f"📊 Stock: {event.symbol}\n"
                 f"💰 Start Price: ₹{event.start_price:.2f} ➔ Current: ₹{event.current_price:.2f}\n"
             )
-
 
         return (
             f"{title}\n\n"
@@ -119,43 +138,52 @@ class TelegramNotifier:
             f"Time: {event.current_timestamp:%H:%M:%S}"
         )
 
+    def _send_immediate(self, event: ExtremeEvent) -> bool:
+        """Perform actual HTTP POST to Telegram API."""
+        if not self.is_configured():
+            return False
 
+        url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+        try:
+            response = requests.post(
+                url,
+                json={
+                    "chat_id": self.chat_id,
+                    "text": self.format_message(event),
+                },
+                timeout=10,
+            )
+            if response.status_code == 429:
+                retry_after = 5
+                try:
+                    retry_after = int(response.json().get("parameters", {}).get("retry_after", 5))
+                except Exception:
+                    pass
+                logger.warning("Telegram 429 rate limit hit. Pausing for %ds", retry_after)
+                time.sleep(retry_after)
+                return False
+
+            response.raise_for_status()
+            return bool(response.json().get("ok"))
+        except Exception as e:
+            logger.error("Failed to post message to Telegram: %s", e)
+            return False
 
     def send(self, event: ExtremeEvent) -> bool:
-        """
-        Send an event to Telegram.
-
-        Returns True if Telegram accepted the message.
-        """
-
+        """Enqueue event for rate-limited async dispatch."""
         if not self.is_configured():
-            raise RuntimeError(
-                "Telegram is not configured. "
-                "Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID."
-            )
-
-        url = (
-            f"https://api.telegram.org/bot"
-            f"{self.bot_token}/sendMessage"
-        )
-
-        response = requests.post(
-            url,
-            json={
-                "chat_id": self.chat_id,
-                "text": self.format_message(event),
-            },
-            timeout=10,
-        )
-
-        response.raise_for_status()
-
-        return bool(response.json().get("ok"))
+            return False
+        try:
+            self._msg_queue.put_nowait(event)
+            return True
+        except queue.Full:
+            logger.warning("Telegram queue full, dropping alert")
+            return False
 
     def send_test_message(self) -> bool:
         """Send a test ping message to verify Telegram bot setup."""
         if not self.is_configured():
-            raise RuntimeError("Telegram credentials missing in .env")
+            raise RuntimeError("Telegram credentials missing in Secrets or .env")
 
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         response = requests.post(
