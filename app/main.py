@@ -235,11 +235,13 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("📱 Telegram Alerts")
 
 # 1. Primary Core Bot (>= ₹1.00)
-if notifier.is_configured():
+is_core_configured = hasattr(notifier, "is_configured") and notifier.is_configured()
+if is_core_configured:
     st.sidebar.success("🟢 Primary Bot (Core ≥₹1.00): Connected")
     if st.sidebar.button("🔔 Test Core Bot Alert", width='stretch'):
         try:
-            notifier.send_test_message()
+            if hasattr(notifier, "send_test_message"):
+                notifier.send_test_message()
             st.toast("✅ Test alert sent to Primary Core channel!", icon="📱")
             st.sidebar.success("✅ Primary bot test alert sent!")
         except Exception as e:
@@ -248,11 +250,13 @@ else:
     st.sidebar.caption("📱 Core Bot: Not configured (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`)")
 
 # 2. Expiry Penny Bot (< ₹1.00)
-if notifier.is_penny_configured():
+is_penny_configured = hasattr(notifier, "is_penny_configured") and notifier.is_penny_configured()
+if is_penny_configured:
     st.sidebar.success("📉 Expiry Bot (Penny <₹1.00): Connected")
     if st.sidebar.button("📉 Test Penny Bot Alert", width='stretch'):
         try:
-            notifier.send_test_penny_message()
+            if hasattr(notifier, "send_test_penny_message"):
+                notifier.send_test_penny_message()
             st.toast("✅ Test alert sent to Penny Decay channel!", icon="📉")
             st.sidebar.success("✅ Penny bot test alert sent!")
         except Exception as e:
@@ -260,7 +264,7 @@ if notifier.is_penny_configured():
 else:
     st.sidebar.caption("📉 Penny Bot: Inactive (`TELEGRAM_PENNY_CHAT_ID` not set)")
 
-if not notifier.is_configured() or not notifier.is_penny_configured():
+if not is_core_configured or not is_penny_configured:
     if st.sidebar.button("🔄 Reload Cloud Secrets", width='stretch', help="Click to reload secrets from Streamlit settings without rebooting"):
         sync_secrets_to_env()
         st.toast("🔄 Cloud secrets reloaded!", icon="🔑")
