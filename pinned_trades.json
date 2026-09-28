@@ -1,14 +1,1 @@
-[
-  {
-    "symbol": "ITC",
-    "strike_price": 520.0,
-    "option_type": "CE",
-    "expiry": "2026-09-24",
-    "pinned_price": 1.51,
-    "pinned_timestamp": "2026-09-28T22:52:50.720743",
-    "instrument_key": "ITC_2026-09-24_520_CE",
-    "threshold": 80.0,
-    "percentage_change": -88.15686274509804,
-    "underlying_price": 518.85
-  }
-]
+[]

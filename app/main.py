@@ -41,8 +41,17 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-from app.data.models import MarketTick, OptionTick, OptionType
-from app.detection.detector import ExtremeEvent, PENNY_PREMIUM_THRESHOLD
+try:
+    from app.data.models import MarketTick, OptionTick, OptionType, PinnedTrade
+except ImportError:
+    from app.data.models import MarketTick, OptionTick, OptionType
+
+try:
+    from app.detection.detector import ExtremeEvent, PENNY_PREMIUM_THRESHOLD
+except ImportError:
+    from app.detection.detector import ExtremeEvent
+    PENNY_PREMIUM_THRESHOLD = 1.00
+
 from app.engine import MonitorEngine
 from app.stocks import get_symbols
 
