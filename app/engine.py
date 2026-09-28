@@ -1,19 +1,23 @@
+import json
 import logging
 import os
 import threading
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from app.alerts.manager import AlertManager
 from app.data.dhan import DhanMarketDataProvider
 from app.data.dummy import DummyMarketDataProvider
-from app.data.models import MarketTick, OptionTick
+from app.data.models import MarketTick, OptionTick, PinnedTrade
 from app.detection.detector import ExtremeDetector, ExtremeEvent
 from app.movement.calculator import calculate_movement
 from app.notifications.telegram import TelegramNotifier
 from app.state.manager import StateManager
 
 logger = logging.getLogger(__name__)
+
+PINNED_FILE_PATH = Path(__file__).resolve().parent.parent / "pinned_trades.json"
 
 
 class MonitorEngine:
@@ -23,7 +27,7 @@ class MonitorEngine:
     - Background DhanHQ WebSocket live tick pipeline
     - Extreme movement detector (-60%, -70%, -80% down crashes)
     - Deduplicated Telegram notifications (dispatched exactly once)
-    - Synchronized live alert state across all connected devices (laptop/mobile)
+    - Synchronized live alert state & pinned active trades across all connected devices
     """
 
     _instance: Optional["MonitorEngine"] = None
@@ -51,10 +55,24 @@ class MonitorEngine:
             enable_random_spikes=True,
         )
         self.recent_alerts: list[ExtremeEvent] = []
+        self.pinned_trades: dict[str, PinnedTrade] = {}
         self.live_ticks_received: int = 0
         self.update_count: int = 0
         self.is_streaming_active: bool = False
         self.cached_real_chains: dict[str, dict] = {}
+        self._load_pinned_trades()
+
+    @property
+    def core_alerts(self) -> list[ExtremeEvent]:
+        """High-conviction core crashes with start premium >= ₹1.00."""
+        with self.lock:
+            return [e for e in self.recent_alerts if not e.is_penny_decay]
+
+    @property
+    def penny_alerts(self) -> list[ExtremeEvent]:
+        """Expiry-week sub-₹1.00 penny decay alerts."""
+        with self.lock:
+            return [e for e in self.recent_alerts if e.is_penny_decay]
 
     def process_tick(self, tick: MarketTick | OptionTick) -> list[ExtremeEvent]:
         """Process incoming tick, update state, detect extreme crashes, and dispatch alerts."""
@@ -98,12 +116,11 @@ class MonitorEngine:
                     if len(self.recent_alerts) > 100:
                         self.recent_alerts = self.recent_alerts[:100]
 
-                    # Dispatch to Telegram exactly once globally
-                    if self.notifier.is_configured():
-                        try:
-                            self.notifier.send(event)
-                        except Exception as e:
-                            logger.error("Failed to send Telegram alert: %s", e)
+                    # Dispatch to Telegram (routed to Core Bot or Penny Bot based on premium)
+                    try:
+                        self.notifier.send(event)
+                    except Exception as e:
+                        logger.error("Failed to send Telegram alert: %s", e)
 
         return new_alerts
 
@@ -166,3 +183,78 @@ class MonitorEngine:
             self.recent_alerts.clear()
             self.live_ticks_received = 0
             self.update_count = 0
+
+    @property
+    def pinned_trades_list(self) -> list[PinnedTrade]:
+        """Return all active pinned trades sorted newest first."""
+        with self.lock:
+            if not hasattr(self, "pinned_trades"):
+                self.pinned_trades = {}
+                self._load_pinned_trades()
+            return sorted(self.pinned_trades.values(), key=lambda p: p.pinned_timestamp, reverse=True)
+
+    def pin_trade(self, event: ExtremeEvent) -> PinnedTrade:
+        """Pin a trade from an extreme alert event and save to disk."""
+        with self.lock:
+            if not hasattr(self, "pinned_trades"):
+                self.pinned_trades = {}
+            key = event.instrument_key or event.symbol
+            entry_price = event.current_price if event.current_price > 0 else event.start_price
+            pinned = PinnedTrade(
+                symbol=event.symbol,
+                strike_price=event.strike_price,
+                option_type=event.option_type,
+                expiry=event.expiry,
+                pinned_price=entry_price,
+                pinned_timestamp=datetime.now(),
+                instrument_key=key,
+                threshold=event.threshold,
+                percentage_change=event.percentage_change,
+                underlying_price=event.underlying_price,
+            )
+            self.pinned_trades[key] = pinned
+            self._save_pinned_trades()
+            return pinned
+
+    def unpin_trade(self, instrument_key: str) -> bool:
+        """Unpin a trade and save to disk."""
+        with self.lock:
+            if not hasattr(self, "pinned_trades"):
+                self.pinned_trades = {}
+            if instrument_key in self.pinned_trades:
+                del self.pinned_trades[instrument_key]
+                self._save_pinned_trades()
+                return True
+            return False
+
+    def clear_pinned_trades(self) -> None:
+        """Clear all active pinned trades and save to disk."""
+        with self.lock:
+            if not hasattr(self, "pinned_trades"):
+                self.pinned_trades = {}
+            self.pinned_trades.clear()
+            self._save_pinned_trades()
+
+    def _save_pinned_trades(self) -> None:
+        """Persist pinned trades to JSON file."""
+        try:
+            data = [p.to_dict() for p in self.pinned_trades.values()]
+            with open(PINNED_FILE_PATH, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.error("Failed to save pinned trades to %s: %s", PINNED_FILE_PATH, e)
+
+    def _load_pinned_trades(self) -> None:
+        """Load pinned trades from JSON file on server startup."""
+        if not PINNED_FILE_PATH.exists():
+            return
+        try:
+            with open(PINNED_FILE_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    for item in data:
+                        trade = PinnedTrade.from_dict(item)
+                        self.pinned_trades[trade.instrument_key] = trade
+            logger.info("Loaded %d pinned trades from disk", len(self.pinned_trades))
+        except Exception as e:
+            logger.error("Failed to load pinned trades from %s: %s", PINNED_FILE_PATH, e)

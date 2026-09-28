@@ -50,21 +50,26 @@ def _get_secret(*keys: str) -> str | None:
 
 
 class TelegramNotifier:
-    """Sends extreme movement notifications through Telegram with background rate-limiting."""
+    """Sends extreme movement notifications through Telegram with dual-tier routing and background rate-limiting."""
 
     def __init__(
         self,
         bot_token: str | None = None,
         chat_id: str | None = None,
+        penny_bot_token: str | None = None,
+        penny_chat_id: str | None = None,
     ) -> None:
         self._bot_token = bot_token
         self._chat_id = chat_id
+        self._penny_bot_token = penny_bot_token
+        self._penny_chat_id = penny_chat_id
         self._msg_queue: queue.Queue = queue.Queue(maxsize=500)
         self._worker_thread = threading.Thread(target=self._dispatch_loop, daemon=True)
         self._worker_thread.start()
 
     @property
     def bot_token(self) -> str | None:
+        """Main bot token for core high-value alerts (>= ₹1.00)."""
         return self._bot_token or _get_secret(
             "TELEGRAM_BOT_TOKEN",
             "TELEGRAM_BOT_ID",
@@ -77,6 +82,7 @@ class TelegramNotifier:
 
     @property
     def chat_id(self) -> str | None:
+        """Main chat ID for core high-value alerts (>= ₹1.00)."""
         return self._chat_id or _get_secret(
             "TELEGRAM_CHAT_ID",
             "TELEGRAM_CHATID",
@@ -87,31 +93,79 @@ class TelegramNotifier:
             "TG_CHAT_ID",
         )
 
+    @property
+    def penny_bot_token(self) -> str | None:
+        """Dedicated bot token for penny decay alerts (< ₹1.00), falls back to main bot token."""
+        return self._penny_bot_token or _get_secret(
+            "TELEGRAM_PENNY_BOT_TOKEN",
+            "TELEGRAM_BOT_TOKEN_PENNY",
+            "PENNY_BOT_TOKEN",
+            "PENNY_BOT_ID",
+        ) or self.bot_token
+
+    @property
+    def penny_chat_id(self) -> str | None:
+        """Dedicated chat ID for penny decay alerts (< ₹1.00)."""
+        return self._penny_chat_id or _get_secret(
+            "TELEGRAM_PENNY_CHAT_ID",
+            "TELEGRAM_CHAT_ID_PENNY",
+            "PENNY_CHAT_ID",
+            "PENNY_GROUP_ID",
+            "TELEGRAM_PENNY_GROUP_ID",
+        )
+
     def is_configured(self) -> bool:
-        """Return whether Telegram credentials are available."""
+        """Return whether Primary Core Telegram credentials are available."""
         return bool(self.bot_token and self.chat_id)
+
+    def is_penny_configured(self) -> bool:
+        """Return whether Penny Decay Telegram credentials are available."""
+        return bool(self.penny_bot_token and self.penny_chat_id)
 
     def _dispatch_loop(self) -> None:
         """Background worker that drains queue and sends alerts respecting rate limits."""
         while True:
             try:
-                event = self._msg_queue.get()
-                if event is None:
+                item = self._msg_queue.get()
+                if item is None:
                     break
-                if self.is_configured():
-                    self._send_immediate(event)
+                event, is_penny = item
+                self._send_immediate(event, is_penny=is_penny)
                 time.sleep(1.2)  # Max 1 message per 1.2s to strictly respect Telegram rate limits
             except Exception as e:
                 logger.error("Error in Telegram dispatch worker: %s", e)
                 time.sleep(2.0)
 
     def format_message(self, event: ExtremeEvent) -> str:
-        """Create a human-readable Telegram message for stock or option alerts."""
-        direction_symbol = "🟢" if event.direction.value == "UP" else "🔴"
+        """Create a human-readable Telegram message for stock or option alerts with tiered severity."""
         duration_minutes = event.duration_seconds / 60
 
-        if event.is_option and event.option_type is not None:
-            title = "🚨 EXTREME OPTION MOVEMENT DETECTED"
+        # Tiered severity headers based on threshold percentage
+        if event.direction.value == "UP":
+            severity_badge = f"🚀 [SPIKE UP +{event.threshold:.0f}%] 🟢"
+            status_icon = "🟢"
+        elif event.threshold >= 80.0:
+            severity_badge = "🚨 [CRITICAL CRASH -80%] 🔴"
+            status_icon = "🔴"
+        elif event.threshold >= 70.0:
+            severity_badge = "⚠️ [HIGH ALERT -70%] 🟡"
+            status_icon = "🟡"
+        else:
+            severity_badge = "📉 [TRIGGER -60%] 🟢"
+            status_icon = "🟢"
+
+        if event.is_penny_decay:
+            title = f"{severity_badge}\n📉 EXTREME PENNY / EXPIRY DECAY (< ₹1.00)"
+            contract_info = (
+                f"📊 Contract: {event.symbol} {event.strike_price:.0f} {event.option_type.value}\n"
+                f"🏷️ Type: {'CALL (CE)' if event.option_type.value == 'CE' else 'PUT (PE)'}\n"
+                f"🎯 Strike: ₹{event.strike_price:.0f} | Expiry: {event.expiry}\n"
+                f"💰 Start Premium: ₹{event.start_price:.2f} ➔ Current: ₹{event.current_price:.2f}\n"
+            )
+            if event.underlying_price > 0:
+                contract_info += f"📈 Underlying Spot: ₹{event.underlying_price:.2f}\n"
+        elif event.is_option and event.option_type is not None:
+            title = f"{severity_badge}\n🚨 EXTREME OPTION MOVEMENT DETECTED"
             contract_info = (
                 f"📊 Contract: {event.symbol} {event.strike_price:.0f} {event.option_type.value}\n"
                 f"🏷️ Type: {'CALL (CE)' if event.option_type.value == 'CE' else 'PUT (PE)'}\n"
@@ -121,7 +175,7 @@ class TelegramNotifier:
             if event.underlying_price > 0:
                 contract_info += f"📈 Underlying Spot: ₹{event.underlying_price:.2f}\n"
         else:
-            title = "🚨 EXTREME MOVEMENT DETECTED"
+            title = f"{severity_badge}\n🚨 EXTREME MOVEMENT DETECTED"
             contract_info = (
                 f"📊 Stock: {event.symbol}\n"
                 f"💰 Start Price: ₹{event.start_price:.2f} ➔ Current: ₹{event.current_price:.2f}\n"
@@ -129,7 +183,7 @@ class TelegramNotifier:
 
         return (
             f"{title}\n\n"
-            f"{direction_symbol} Stock: {event.symbol}\n"
+            f"{status_icon} Stock: {event.symbol}\n"
             f"Movement: {event.percentage_change:+.2f}%\n"
             f"Direction: {event.direction.value}\n"
             f"Threshold: {event.threshold:.0f}%\n"
@@ -138,17 +192,25 @@ class TelegramNotifier:
             f"Time: {event.current_timestamp:%H:%M:%S}"
         )
 
-    def _send_immediate(self, event: ExtremeEvent) -> bool:
-        """Perform actual HTTP POST to Telegram API."""
-        if not self.is_configured():
-            return False
+    def _send_immediate(self, event: ExtremeEvent, is_penny: bool = False) -> bool:
+        """Perform actual HTTP POST to the appropriate Telegram bot and channel."""
+        if is_penny:
+            if not self.is_penny_configured():
+                return False
+            token = self.penny_bot_token
+            chat_id = self.penny_chat_id
+        else:
+            if not self.is_configured():
+                return False
+            token = self.bot_token
+            chat_id = self.chat_id
 
-        url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
         try:
             response = requests.post(
                 url,
                 json={
-                    "chat_id": self.chat_id,
+                    "chat_id": chat_id,
                     "text": self.format_message(event),
                 },
                 timeout=10,
@@ -166,24 +228,31 @@ class TelegramNotifier:
             response.raise_for_status()
             return bool(response.json().get("ok"))
         except Exception as e:
-            logger.error("Failed to post message to Telegram: %s", e)
+            logger.error("Failed to post message to Telegram (%s): %s", "Penny" if is_penny else "Core", e)
             return False
 
     def send(self, event: ExtremeEvent) -> bool:
-        """Enqueue event for rate-limited async dispatch."""
-        if not self.is_configured():
-            return False
+        """Enqueue event for rate-limited async dispatch to the appropriate bot/channel."""
+        is_penny = event.is_penny_decay
+        if is_penny:
+            if not self.is_penny_configured():
+                # Penny channel is not configured yet; don't clutter the main bot
+                return False
+        else:
+            if not self.is_configured():
+                return False
+
         try:
-            self._msg_queue.put_nowait(event)
+            self._msg_queue.put_nowait((event, is_penny))
             return True
         except queue.Full:
             logger.warning("Telegram queue full, dropping alert")
             return False
 
     def send_test_message(self) -> bool:
-        """Send a test ping message to verify Telegram bot setup."""
+        """Send a test ping message to verify Primary Core Telegram bot setup."""
         if not self.is_configured():
-            raise RuntimeError("Telegram credentials missing in Secrets or .env")
+            raise RuntimeError("Primary Telegram credentials missing in Secrets or .env (TELEGRAM_BOT_TOKEN & TELEGRAM_CHAT_ID)")
 
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         response = requests.post(
@@ -191,10 +260,31 @@ class TelegramNotifier:
             json={
                 "chat_id": self.chat_id,
                 "text": (
-                    "⚡ <b>F&O Extreme Movement Monitor</b>\n\n"
-                    "✅ <b>Telegram Bot Connected Successfully!</b>\n"
-                    "Your system is configured to receive real-time alerts for "
-                    "-60%, -70%, and -80% option premium crashes."
+                    "⚡ <b>F&O Extreme Movement Monitor — Core Bot</b>\n\n"
+                    "✅ <b>Primary Core Bot Connected Successfully!</b>\n"
+                    "This channel will receive high-conviction alerts for <b>₹1.00+ option crashes</b> (-60%, -70%, -80%)."
+                ),
+                "parse_mode": "HTML",
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        return bool(response.json().get("ok"))
+
+    def send_test_penny_message(self) -> bool:
+        """Send a test ping message to verify Expiry Penny Decay Telegram bot setup."""
+        if not self.is_penny_configured():
+            raise RuntimeError("Penny Telegram credentials missing in Secrets or .env (TELEGRAM_PENNY_CHAT_ID)")
+
+        url = f"https://api.telegram.org/bot{self.penny_bot_token}/sendMessage"
+        response = requests.post(
+            url,
+            json={
+                "chat_id": self.penny_chat_id,
+                "text": (
+                    "📉 <b>F&O Option Monitor — Expiry Penny Bot</b>\n\n"
+                    "✅ <b>Penny & Expiry Decay Bot Connected Successfully!</b>\n"
+                    "This dedicated channel will receive alerts for <b>sub-₹1.00 penny decay</b>."
                 ),
                 "parse_mode": "HTML",
             },

@@ -11,6 +11,9 @@ class MovementDirection(str, Enum):
     DOWN = "DOWN"
 
 
+PENNY_PREMIUM_THRESHOLD: float = 1.00
+
+
 @dataclass(frozen=True)
 class ExtremeEvent:
     """Represents an extreme stock or option premium movement."""
@@ -34,6 +37,11 @@ class ExtremeEvent:
     def is_option(self) -> bool:
         """True if event is on an Option contract."""
         return self.option_type is not None and self.strike_price > 0
+
+    @property
+    def is_penny_decay(self) -> bool:
+        """True if contract started at a penny level (< ₹1.00), typical of expiry decay."""
+        return self.is_option and self.start_price < PENNY_PREMIUM_THRESHOLD
 
     @property
     def display_title(self) -> str:

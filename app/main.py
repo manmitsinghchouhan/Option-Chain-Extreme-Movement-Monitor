@@ -42,6 +42,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from app.data.models import MarketTick, OptionTick, OptionType
+from app.detection.detector import ExtremeEvent, PENNY_PREMIUM_THRESHOLD
 from app.engine import MonitorEngine
 from app.stocks import get_symbols
 
@@ -114,19 +115,37 @@ st.markdown(
         50% { opacity: 1; }
         100% { opacity: 0.7; }
     }
-    .alert-card-up {
-        background: rgba(34, 197, 94, 0.08);
-        border: 1px solid rgba(34, 197, 94, 0.3);
-        border-left: 5px solid #22c55e;
+    .alert-card-60 {
+        background: rgba(16, 185, 129, 0.08);
+        border: 1px solid rgba(16, 185, 129, 0.3);
+        border-left: 6px solid #10b981;
         border-radius: 8px;
         padding: 12px 18px;
         margin-bottom: 12px;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
     }
-    .alert-card-down {
-        background: rgba(239, 68, 68, 0.08);
-        border: 1px solid rgba(239, 68, 68, 0.3);
-        border-left: 5px solid #ef4444;
+    .alert-card-70 {
+        background: rgba(245, 158, 11, 0.09);
+        border: 1px solid rgba(245, 158, 11, 0.35);
+        border-left: 6px solid #f59e0b;
+        border-radius: 8px;
+        padding: 12px 18px;
+        margin-bottom: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    }
+    .alert-card-80 {
+        background: rgba(239, 68, 68, 0.12);
+        border: 1px solid rgba(239, 68, 68, 0.4);
+        border-left: 6px solid #ef4444;
+        border-radius: 8px;
+        padding: 12px 18px;
+        margin-bottom: 12px;
+        box-shadow: 0 4px 16px rgba(239, 68, 68, 0.15);
+    }
+    .alert-card-up {
+        background: rgba(56, 189, 248, 0.08);
+        border: 1px solid rgba(56, 189, 248, 0.3);
+        border-left: 6px solid #38bdf8;
         border-radius: 8px;
         padding: 12px 18px;
         margin-bottom: 12px;
@@ -202,20 +221,39 @@ if is_dhan_mode:
 else:
     st.sidebar.info("🔘 Simulation Mode: Active (Brownian Motion)")
 
+# Sidebar Telegram Status
+st.sidebar.markdown("---")
+st.sidebar.subheader("📱 Telegram Alerts")
+
+# 1. Primary Core Bot (>= ₹1.00)
 if notifier.is_configured():
-    st.sidebar.success("📱 Telegram Bot: Connected")
-    if st.sidebar.button("🔔 Send Test Telegram Alert", width='stretch'):
+    st.sidebar.success("🟢 Primary Bot (Core ≥₹1.00): Connected")
+    if st.sidebar.button("🔔 Test Core Bot Alert", width='stretch'):
         try:
             notifier.send_test_message()
-            st.toast("✅ Test Telegram alert sent successfully!", icon="📱")
-            st.sidebar.success("✅ Test alert sent to Telegram!")
+            st.toast("✅ Test alert sent to Primary Core channel!", icon="📱")
+            st.sidebar.success("✅ Primary bot test alert sent!")
         except Exception as e:
-            st.sidebar.error(f"Failed to send Telegram message: {e}")
+            st.sidebar.error(f"Core Bot error: {e}")
 else:
-    st.sidebar.caption("📱 Telegram: Not configured (add to Streamlit Secrets)")
+    st.sidebar.caption("📱 Core Bot: Not configured (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`)")
+
+# 2. Expiry Penny Bot (< ₹1.00)
+if notifier.is_penny_configured():
+    st.sidebar.success("📉 Expiry Bot (Penny <₹1.00): Connected")
+    if st.sidebar.button("📉 Test Penny Bot Alert", width='stretch'):
+        try:
+            notifier.send_test_penny_message()
+            st.toast("✅ Test alert sent to Penny Decay channel!", icon="📉")
+            st.sidebar.success("✅ Penny bot test alert sent!")
+        except Exception as e:
+            st.sidebar.error(f"Penny Bot error: {e}")
+else:
+    st.sidebar.caption("📉 Penny Bot: Inactive (`TELEGRAM_PENNY_CHAT_ID` not set)")
+
+if not notifier.is_configured() or not notifier.is_penny_configured():
     if st.sidebar.button("🔄 Reload Cloud Secrets", width='stretch', help="Click to reload secrets from Streamlit settings without rebooting"):
         sync_secrets_to_env()
-        st.cache_resource.clear()
         st.toast("🔄 Cloud secrets reloaded!", icon="🔑")
         st.rerun()
 
@@ -235,6 +273,8 @@ refresh_speed = st.sidebar.selectbox(
 is_market_open, market_session_status = check_market_session_ist()
 
 total_contracts = len(all_symbols) * 18
+core_alerts_list = engine.core_alerts
+penny_alerts_list = engine.penny_alerts
 
 h_col1, h_col2 = st.columns([3, 1])
 with h_col1:
@@ -261,11 +301,11 @@ with col1:
 with col2:
     st.metric("Option Contracts", f"{total_contracts:,} CE/PE")
 with col3:
-    st.metric("Detection Window", "60 min Rolling")
-with col4:
     st.metric("Alert Thresholds", "-60%, -70%, -80%")
+with col4:
+    st.metric("🚨 Core Crashes (≥₹1.00)", f"{len(core_alerts_list)}")
 with col5:
-    st.metric("Active Alerts Triggered", f"{len(engine.recent_alerts)}")
+    st.metric("📉 Penny Decay (<₹1.00)", f"{len(penny_alerts_list)}")
 
 st.divider()
 
@@ -361,63 +401,208 @@ if movers:
     st.markdown("<br>", unsafe_allow_html=True)
 
 # -------------------------------------------------------------------
-# Live Extreme Alerts Feed (Shared Global Stream)
+# Pinned Trades & Active Watchlist (Always-Visible Top Priority Station)
+# -------------------------------------------------------------------
+
+pinned_list = getattr(engine, "pinned_trades_list", [])
+
+st.subheader(f"📌 Pinned Trades & Active Watchlist ({len(pinned_list)})")
+
+if pinned_list:
+    p_header_col1, p_header_col2 = st.columns([4, 1.2])
+    with p_header_col1:
+        st.caption("⚡ **Live P&L Tracking:** Return updates continuously via real-time WebSocket ticks.")
+    with p_header_col2:
+        if st.button("🗑️ Clear All Pinned", width='stretch', key="clear_all_pinned_btn"):
+            if hasattr(engine, "clear_pinned_trades"):
+                engine.clear_pinned_trades()
+            st.toast("🗑️ Cleared all pinned trades!", icon="📌")
+            st.rerun()
+
+    for item in pinned_list:
+        # Query latest live price from state_manager
+        obs = state_manager.get_latest(item.instrument_key)
+        if obs and obs.price > 0:
+            current_live_price = obs.price
+        elif not is_dhan_mode:
+            current_live_price = engine.dummy_provider.premiums.get(item.instrument_key, item.pinned_price)
+        else:
+            current_live_price = item.pinned_price
+
+        # Calculate live return since pinned
+        if item.pinned_price > 0:
+            live_return_pct = ((current_live_price - item.pinned_price) / item.pinned_price) * 100
+        else:
+            live_return_pct = 0.0
+
+        if live_return_pct > 0:
+            return_color = "#4ade80"
+            return_icon = "▲"
+            return_bg = "rgba(34, 197, 94, 0.15)"
+            return_border = "#22c55e"
+        elif live_return_pct < 0:
+            return_color = "#f87171"
+            return_icon = "▼"
+            return_bg = "rgba(239, 68, 68, 0.15)"
+            return_border = "#ef4444"
+        else:
+            return_color = "#94a3b8"
+            return_icon = "●"
+            return_bg = "rgba(148, 163, 184, 0.15)"
+            return_border = "#64748b"
+
+        p_card_col, p_action_col = st.columns([5.2, 0.9])
+        with p_card_col:
+            underlying_spot = state_manager.get_underlying_price(item.symbol) or item.underlying_price
+            spot_str = f" | 📈 Spot: <strong>₹{underlying_spot:.2f}</strong>" if underlying_spot > 0 else ""
+            expiry_str = f" | 🏷️ Expiry: <strong>{item.expiry}</strong>" if item.expiry else ""
+
+            pinned_card_html = (
+                f'<div style="background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(56, 189, 248, 0.35); border-left: 6px solid #38bdf8; border-radius: 8px; padding: 12px 18px; margin-bottom: 8px;">'
+                f'<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">'
+                f'<div>'
+                f'<strong style="font-size: 1.15rem; color: #f8fafc;">📌 {item.display_title}</strong>'
+                f'<span style="background: {return_bg}; color: {return_color}; border: 1px solid {return_border}; font-weight: 700; padding: 3px 10px; border-radius: 4px; margin-left: 10px; font-size: 0.9rem;">'
+                f'{return_icon} {live_return_pct:+.2f}% Live Return'
+                f'</span>'
+                f'</div>'
+                f'<div style="font-size: 0.85rem; color: #94a3b8;">'
+                f'Pinned at: {item.pinned_timestamp.strftime("%H:%M:%S")}'
+                f'</div>'
+                f'</div>'
+                f'<div style="margin-top: 6px; font-size: 0.95rem; color: #cbd5e1;">'
+                f'💰 Pinned Entry: <strong>₹{item.pinned_price:.2f}</strong> ➔ Live Now: <strong style="color: {return_color};">₹{current_live_price:.2f}</strong>'
+                f'{spot_str}'
+                f'{expiry_str}'
+                f'</div>'
+                f'</div>'
+            )
+            st.markdown(pinned_card_html, unsafe_allow_html=True)
+        with p_action_col:
+            st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
+            if st.button("❌ Remove", key=f"unpin_btn_{item.instrument_key}", width='stretch', help="Remove from pinned watchlist"):
+                if hasattr(engine, "unpin_trade"):
+                    engine.unpin_trade(item.instrument_key)
+                st.toast(f"Removed {item.display_title} from pinned trades.", icon="❌")
+                st.rerun()
+else:
+    st.info("💡 **No pinned trades yet.** Click **'📌 Pin'** on any alert below to lock it here for live return tracking.")
+
+st.divider()
+
+# -------------------------------------------------------------------
+# Live Extreme Alerts Feed (Two-Tier Architecture)
 # -------------------------------------------------------------------
 
 st.subheader("🚨 Live Extreme Option Alerts")
 
-if engine.recent_alerts:
+tab_core, tab_penny = st.tabs([
+    f"🚨 Core Option Crashes (≥ ₹1.00) — [{len(core_alerts_list)}]",
+    f"📉 Expiry Penny Decay (< ₹1.00) — [{len(penny_alerts_list)}]",
+])
+
+def render_alert_cards(alert_list: list[ExtremeEvent], tab_key: str, empty_msg: str):
+    if not alert_list:
+        st.info(empty_msg)
+        return
+
     f_col1, f_col2 = st.columns([1, 1])
     with f_col1:
-        symbols_with_alerts = sorted(list({e.symbol for e in engine.recent_alerts}))
-        selected_alert_symbol = st.selectbox("Filter alerts by Stock", ["ALL"] + symbols_with_alerts)
+        symbols_in_tab = sorted(list({e.symbol for e in alert_list}))
+        selected_stock_filter = st.selectbox("Filter by Stock", ["ALL"] + symbols_in_tab, key=f"filter_stock_{tab_key}")
     with f_col2:
-        selected_dir = st.selectbox("Filter by Direction", ["ALL", "UP (+)", "DOWN (-)"])
+        selected_dir_filter = st.selectbox("Filter by Direction", ["ALL", "UP (+)", "DOWN (-)"], key=f"filter_dir_{tab_key}")
 
-    filtered_alerts = engine.recent_alerts
-    if selected_alert_symbol != "ALL":
-        filtered_alerts = [e for e in filtered_alerts if e.symbol == selected_alert_symbol]
-    if selected_dir == "UP (+)":
-        filtered_alerts = [e for e in filtered_alerts if e.direction.value == "UP"]
-    elif selected_dir == "DOWN (-)":
-        filtered_alerts = [e for e in filtered_alerts if e.direction.value == "DOWN"]
+    filtered = alert_list
+    if selected_stock_filter != "ALL":
+        filtered = [e for e in filtered if e.symbol == selected_stock_filter]
+    if selected_dir_filter == "UP (+)":
+        filtered = [e for e in filtered if e.direction.value == "UP"]
+    elif selected_dir_filter == "DOWN (-)":
+        filtered = [e for e in filtered if e.direction.value == "DOWN"]
 
-    for event in filtered_alerts[:12]:
+    for event in filtered[:15]:
         is_up = event.direction.value == "UP"
-        card_class = "alert-card-up" if is_up else "alert-card-down"
-        badge_color = "#22c55e" if is_up else "#ef4444"
-        dir_icon = "🟢 UP" if is_up else "🔴 DOWN"
+        if is_up:
+            card_class = "alert-card-up"
+            badge_color = "#38bdf8"
+            badge_text_color = "#020617"
+            dir_icon = "🟢 UP"
+        else:
+            # Downward crash color differentiation based on threshold severity
+            if event.threshold >= 80.0:
+                card_class = "alert-card-80"
+                badge_color = "#ef4444"
+                badge_text_color = "#ffffff"
+                dir_icon = "🔴 -80% CRITICAL"
+            elif event.threshold >= 70.0:
+                card_class = "alert-card-70"
+                badge_color = "#f59e0b"
+                badge_text_color = "#0f172a"
+                dir_icon = "🟡 -70% HIGH"
+            else:
+                card_class = "alert-card-60"
+                badge_color = "#10b981"
+                badge_text_color = "#0f172a"
+                dir_icon = "🟢 -60% TRIGGER"
+
         spot_val = event.underlying_price if event.underlying_price > 0 else (state_manager.get_underlying_price(event.symbol) or 0.0)
         spot_html = f" | 📈 Spot: <strong>₹{spot_val:.2f}</strong>" if spot_val > 0 else ""
         expiry_html = f" | 🏷️ Expiry: <strong>{event.expiry}</strong>" if event.expiry else ""
 
-        card_html = (
-            f'<div class="{card_class}">'
-            f'<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">'
-            f'<div>'
-            f'<strong style="font-size: 1.15rem; color: #f8fafc;">{event.display_title}</strong>'
-            f'<span style="background: {badge_color}; color: #020617; font-weight: 700; padding: 2px 8px; border-radius: 4px; margin-left: 8px;">'
-            f'{event.percentage_change:+.2f}% ({dir_icon})'
-            f'</span>'
-            f'<span style="color: #94a3b8; margin-left: 8px; font-weight: 500;">Threshold: {event.threshold:.0f}%</span>'
-            f'</div>'
-            f'<div style="font-size: 0.9rem; color: #cbd5e1;">'
-            f'⏱️ {event.current_timestamp.strftime("%H:%M:%S")} ({event.duration_seconds/60:.1f}m window)'
-            f'</div>'
-            f'</div>'
-            f'<div style="margin-top: 8px; font-size: 0.95rem; color: #cbd5e1;">'
-            f'💰 Premium: <strong>₹{event.start_price:.2f}</strong> ➔ <strong>₹{event.current_price:.2f}</strong>'
-            f'{spot_html}'
-            f'{expiry_html}'
-            f'</div>'
-            f'</div>'
-        )
-        st.markdown(card_html, unsafe_allow_html=True)
-else:
-    if is_dhan_mode:
-        st.info("Waiting for live extreme option movements from DhanHQ WebSocket. (0 alerts triggered).")
-    else:
-        st.info("No extreme option premium jumps detected yet. Turn ON **'🟢 Live Auto-Streaming'** to scan simulation.")
+        c_col, btn_col = st.columns([5.2, 0.9])
+        with c_col:
+            card_html = (
+                f'<div class="{card_class}">'
+                f'<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">'
+                f'<div>'
+                f'<strong style="font-size: 1.15rem; color: #f8fafc;">{event.display_title}</strong>'
+                f'<span style="background: {badge_color}; color: {badge_text_color}; font-weight: 700; padding: 3px 8px; border-radius: 4px; margin-left: 8px; font-size: 0.85rem;">'
+                f'{event.percentage_change:+.2f}% ({dir_icon})'
+                f'</span>'
+                f'<span style="color: #94a3b8; margin-left: 8px; font-weight: 500;">Threshold: {event.threshold:.0f}%</span>'
+                f'</div>'
+                f'<div style="font-size: 0.9rem; color: #cbd5e1;">'
+                f'⏱️ {event.current_timestamp.strftime("%H:%M:%S")} ({event.duration_seconds/60:.1f}m window)'
+                f'</div>'
+                f'</div>'
+                f'<div style="margin-top: 8px; font-size: 0.95rem; color: #cbd5e1;">'
+                f'💰 Premium: <strong>₹{event.start_price:.2f}</strong> ➔ <strong>₹{event.current_price:.2f}</strong>'
+                f'{spot_html}'
+                f'{expiry_html}'
+                f'</div>'
+                f'</div>'
+            )
+            st.markdown(card_html, unsafe_allow_html=True)
+
+        with btn_col:
+            st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
+            key_id = event.instrument_key or event.symbol
+            pinned_map = getattr(engine, "pinned_trades", {})
+            is_pinned = key_id in pinned_map
+            if is_pinned:
+                st.button("📌 Pinned", key=f"pinned_badge_{tab_key}_{key_id}_{event.threshold}", disabled=True, width='stretch')
+            else:
+                if st.button("📌 Pin", key=f"pin_action_{tab_key}_{key_id}_{event.threshold}", width='stretch', help="Lock trade to Pinned Active Watchlist"):
+                    if hasattr(engine, "pin_trade"):
+                        engine.pin_trade(event)
+                    st.toast(f"📌 Pinned {event.display_title} to Active Watchlist!", icon="🎯")
+                    st.rerun()
+
+with tab_core:
+    render_alert_cards(
+        core_alerts_list,
+        tab_key="core",
+        empty_msg="No core high-value option crashes (≥ ₹1.00) detected yet.",
+    )
+
+with tab_penny:
+    st.caption("📉 **Expiry Penny Stream:** Tracks sub-₹1.00 options decaying towards zero near monthly expiry.")
+    render_alert_cards(
+        penny_alerts_list,
+        tab_key="penny",
+        empty_msg="No sub-₹1.00 expiry penny decay alerts recorded yet.",
+    )
 
 st.divider()
 
