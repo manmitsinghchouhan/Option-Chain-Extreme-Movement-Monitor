@@ -4,9 +4,20 @@ import queue
 import threading
 import time
 
+from datetime import datetime, timezone, timedelta
 import requests
 
 from app.detection.detector import ExtremeEvent
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def format_ist_time(dt: datetime) -> str:
+    """Format any datetime (UTC or naive) into IST HH:MM:SS string."""
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(IST).strftime("%H:%M:%S")
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +74,14 @@ class TelegramNotifier:
         self._chat_id = chat_id
         self._penny_bot_token = penny_bot_token
         self._penny_chat_id = penny_chat_id
-        self._msg_queue: queue.Queue = queue.Queue(maxsize=500)
-        self._worker_thread = threading.Thread(target=self._dispatch_loop, daemon=True)
-        self._worker_thread.start()
+        self._core_queue: queue.Queue = queue.Queue(maxsize=1000)
+        self._penny_queue: queue.Queue = queue.Queue(maxsize=1000)
+
+        self._core_worker = threading.Thread(target=self._core_dispatch_loop, daemon=True)
+        self._core_worker.start()
+
+        self._penny_worker = threading.Thread(target=self._penny_dispatch_loop, daemon=True)
+        self._penny_worker.start()
 
     @property
     def bot_token(self) -> str | None:
@@ -122,19 +138,31 @@ class TelegramNotifier:
         """Return whether Penny Decay Telegram credentials are available."""
         return bool(self.penny_bot_token and self.penny_chat_id)
 
-    def _dispatch_loop(self) -> None:
-        """Background worker that drains queue and sends alerts respecting rate limits."""
+    def _core_dispatch_loop(self) -> None:
+        """Dedicated background worker for Primary Core channel (>= ₹1.00)."""
         while True:
             try:
-                item = self._msg_queue.get()
-                if item is None:
+                event = self._core_queue.get()
+                if event is None:
                     break
-                event, is_penny = item
-                self._send_immediate(event, is_penny=is_penny)
-                time.sleep(1.2)  # Max 1 message per 1.2s to strictly respect Telegram rate limits
+                self._send_immediate(event, is_penny=False)
+                time.sleep(0.8)  # Smooth rate limiting
             except Exception as e:
-                logger.error("Error in Telegram dispatch worker: %s", e)
-                time.sleep(2.0)
+                logger.error("Error in Core Telegram dispatch worker: %s", e)
+                time.sleep(1.5)
+
+    def _penny_dispatch_loop(self) -> None:
+        """Dedicated background worker for Expiry Penny channel (< ₹1.00)."""
+        while True:
+            try:
+                event = self._penny_queue.get()
+                if event is None:
+                    break
+                self._send_immediate(event, is_penny=True)
+                time.sleep(0.8)  # Smooth rate limiting
+            except Exception as e:
+                logger.error("Error in Penny Telegram dispatch worker: %s", e)
+                time.sleep(1.5)
 
     def format_message(self, event: ExtremeEvent) -> str:
         """Create a human-readable Telegram message for stock or option alerts with tiered severity."""
@@ -189,7 +217,7 @@ class TelegramNotifier:
             f"Threshold: {event.threshold:.0f}%\n"
             f"{contract_info}"
             f"Duration: {duration_minutes:.1f} minutes\n"
-            f"Time: {event.current_timestamp:%H:%M:%S}"
+            f"Time: {format_ist_time(event.current_timestamp)} IST"
         )
 
     def _send_immediate(self, event: ExtremeEvent, is_penny: bool = False) -> bool:
@@ -236,18 +264,24 @@ class TelegramNotifier:
         is_penny = event.is_penny_decay
         if is_penny:
             if not self.is_penny_configured():
-                # Penny channel is not configured yet; don't clutter the main bot
                 return False
+            target_queue = self._penny_queue
         else:
             if not self.is_configured():
                 return False
+            target_queue = self._core_queue
 
         try:
-            self._msg_queue.put_nowait((event, is_penny))
+            target_queue.put_nowait(event)
             return True
         except queue.Full:
-            logger.warning("Telegram queue full, dropping alert")
-            return False
+            # If queue is full during extreme volatility burst, drop the oldest stale message and keep latest
+            try:
+                target_queue.get_nowait()
+                target_queue.put_nowait(event)
+                return True
+            except Exception:
+                return False
 
     def send_test_message(self) -> bool:
         """Send a test ping message to verify Primary Core Telegram bot setup."""

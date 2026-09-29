@@ -2,9 +2,11 @@ import json
 import logging
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 from app.alerts.manager import AlertManager
 from app.data.dhan import DhanMarketDataProvider
@@ -109,18 +111,23 @@ class MonitorEngine:
                 underlying_price=tick.underlying_price,
             )
 
+            tick_new_alerts = []
             for event in events:
                 if self.alert_manager.process(event):
+                    tick_new_alerts.append(event)
                     new_alerts.append(event)
                     self.recent_alerts.insert(0, event)
-                    if len(self.recent_alerts) > 100:
-                        self.recent_alerts = self.recent_alerts[:100]
 
-                    # Dispatch to Telegram (routed to Core Bot or Penny Bot based on premium)
-                    try:
-                        self.notifier.send(event)
-                    except Exception as e:
-                        logger.error("Failed to send Telegram alert: %s", e)
+            if tick_new_alerts:
+                if len(self.recent_alerts) > 100:
+                    self.recent_alerts = self.recent_alerts[:100]
+
+                # Dispatch highest severity threshold crossed in this tick to avoid message spam
+                highest_event = max(tick_new_alerts, key=lambda e: e.threshold)
+                try:
+                    self.notifier.send(highest_event)
+                except Exception as e:
+                    logger.error("Failed to send Telegram alert: %s", e)
 
         return new_alerts
 
@@ -206,7 +213,7 @@ class MonitorEngine:
                 option_type=event.option_type,
                 expiry=event.expiry,
                 pinned_price=entry_price,
-                pinned_timestamp=datetime.now(),
+                pinned_timestamp=datetime.now(IST),
                 instrument_key=key,
                 threshold=event.threshold,
                 percentage_change=event.percentage_change,

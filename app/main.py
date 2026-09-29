@@ -12,6 +12,14 @@ IST = timezone(timedelta(hours=5, minutes=30))
 def get_ist_now() -> datetime:
     return datetime.now(IST)
 
+def format_ist_time(dt: datetime) -> str:
+    """Safely format any datetime (UTC, naive, or IST) into Indian Standard Time HH:MM:SS."""
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(IST).strftime("%H:%M:%S")
+
 def check_market_session_ist() -> tuple[bool, str]:
     """Check if Indian NSE Stock Exchange is actively open."""
     now_ist = get_ist_now()
@@ -480,7 +488,7 @@ if pinned_list:
                 f'</span>'
                 f'</div>'
                 f'<div style="font-size: 0.85rem; color: #94a3b8;">'
-                f'Pinned at: {item.pinned_timestamp.strftime("%H:%M:%S")}'
+                f'Pinned at: {format_ist_time(item.pinned_timestamp)}'
                 f'</div>'
                 f'</div>'
                 f'<div style="margin-top: 6px; font-size: 0.95rem; color: #cbd5e1;">'
@@ -576,7 +584,7 @@ def render_alert_cards(alert_list: list[ExtremeEvent], tab_key: str, empty_msg: 
                 f'<span style="color: #94a3b8; margin-left: 8px; font-weight: 500;">Threshold: {event.threshold:.0f}%</span>'
                 f'</div>'
                 f'<div style="font-size: 0.9rem; color: #cbd5e1;">'
-                f'⏱️ {event.current_timestamp.strftime("%H:%M:%S")} ({event.duration_seconds/60:.1f}m window)'
+                f'⏱️ {format_ist_time(event.current_timestamp)} ({event.duration_seconds/60:.1f}m window)'
                 f'</div>'
                 f'</div>'
                 f'<div style="margin-top: 8px; font-size: 0.95rem; color: #cbd5e1;">'
@@ -656,7 +664,7 @@ if is_dhan_mode and engine.dhan_provider:
                     state_manager.update(MarketTick(
                         symbol=selected_stock,
                         price=real_chain["spot_price"],
-                        timestamp=datetime.now(),
+                        timestamp=get_ist_now(),
                         volume=0,
                     ))
                 for s in real_chain.get("strikes", []):
@@ -667,7 +675,7 @@ if is_dhan_mode and engine.dhan_provider:
                             option_type=OptionType.CE,
                             expiry=real_chain["expiry"],
                             premium=s["ce_ltp"],
-                            timestamp=datetime.now(),
+                            timestamp=get_ist_now(),
                             volume=s.get("ce_volume", 0),
                             open_interest=s.get("ce_oi", 0),
                             underlying_price=real_chain["spot_price"],
@@ -681,7 +689,7 @@ if is_dhan_mode and engine.dhan_provider:
                             option_type=OptionType.PE,
                             expiry=real_chain["expiry"],
                             premium=s["pe_ltp"],
-                            timestamp=datetime.now(),
+                            timestamp=get_ist_now(),
                             volume=s.get("pe_volume", 0),
                             open_interest=s.get("pe_oi", 0),
                             underlying_price=real_chain["spot_price"],

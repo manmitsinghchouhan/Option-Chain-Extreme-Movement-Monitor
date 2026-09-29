@@ -1,11 +1,13 @@
 import asyncio
 import random
 from collections.abc import AsyncIterator
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.data.base import MarketDataProvider
 from app.data.models import MarketTick, OptionTick, OptionType
 from app.stocks import get_symbols
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 
 def get_strike_interval(price: float) -> float:
@@ -62,7 +64,7 @@ class DummyMarketDataProvider(MarketDataProvider):
         self.extreme_test_symbol = extreme_test_symbol
         self._extreme_step = 0
         self.extreme_starting_premiums: dict[str, float] = {}
-        self._simulation_timestamp = datetime.now()
+        self._simulation_timestamp = datetime.now(IST)
 
         # Dynamic manual injection trigger: (instrument_key, multiplier)
         self._pending_spikes: dict[str, float] = {}

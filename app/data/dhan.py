@@ -3,8 +3,10 @@ import logging
 import os
 import queue
 from collections.abc import AsyncIterator
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Optional
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 from dotenv import load_dotenv
 
@@ -108,7 +110,7 @@ class DhanMarketDataProvider(MarketDataProvider):
                     option_type=meta["option_type"],
                     expiry=meta["expiry"],
                     premium=ltp,
-                    timestamp=datetime.now(),
+                    timestamp=datetime.now(IST),
                     volume=volume,
                     open_interest=oi,
                     underlying_price=0.0,
@@ -362,7 +364,7 @@ class DhanMarketDataProvider(MarketDataProvider):
                         eq_tick = MarketTick(
                             symbol=meta["symbol"],
                             price=ltp,
-                            timestamp=datetime.now(),
+                            timestamp=datetime.now(IST),
                             volume=vol,
                         )
                         self.live_queue.put_nowait(eq_tick)
@@ -379,7 +381,7 @@ class DhanMarketDataProvider(MarketDataProvider):
                         option_type=meta["option_type"],
                         expiry=meta["expiry"],
                         premium=ltp,
-                        timestamp=datetime.now(),
+                        timestamp=datetime.now(IST),
                         volume=vol,
                         open_interest=oi,
                         underlying_price=spot_val,
