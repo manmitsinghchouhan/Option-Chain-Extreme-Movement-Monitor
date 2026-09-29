@@ -60,6 +60,10 @@ def _get_secret(*keys: str) -> str | None:
     return None
 
 
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+
 class TelegramNotifier:
     """Sends extreme movement notifications through Telegram with 3-tier routing (Core Stocks, Indices, Penny Decay) and background rate-limiting."""
 
@@ -78,6 +82,18 @@ class TelegramNotifier:
         self._index_chat_id = index_chat_id
         self._penny_bot_token = penny_bot_token
         self._penny_chat_id = penny_chat_id
+
+        # Connection-pooled resilient requests session
+        self._session = requests.Session()
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1.0,
+            status_forcelist=[500, 502, 503, 504],
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=10, pool_maxsize=20)
+        self._session.mount("https://", adapter)
+        self._session.mount("http://", adapter)
 
         self._core_queue: queue.Queue = queue.Queue(maxsize=1000)
         self._index_queue: queue.Queue = queue.Queue(maxsize=1000)
@@ -180,7 +196,7 @@ class TelegramNotifier:
                 if event is None:
                     break
                 self._send_immediate(event, channel_type="core")
-                time.sleep(0.8)  # Smooth rate limiting
+                time.sleep(1.2)  # Safe rate limit for groups
             except Exception as e:
                 logger.error("Error in Core Telegram dispatch worker: %s", e)
                 time.sleep(1.5)
@@ -193,7 +209,7 @@ class TelegramNotifier:
                 if event is None:
                     break
                 self._send_immediate(event, channel_type="index")
-                time.sleep(0.8)  # Smooth rate limiting
+                time.sleep(1.2)  # Safe rate limit for groups
             except Exception as e:
                 logger.error("Error in Index Telegram dispatch worker: %s", e)
                 time.sleep(1.5)
@@ -206,10 +222,10 @@ class TelegramNotifier:
                 if event is None:
                     break
                 self._send_immediate(event, channel_type="penny")
-                time.sleep(0.8)  # Smooth rate limiting
+                time.sleep(2.2)  # 2.2s delay ensures ~27 msgs/min max, well within Telegram group limits
             except Exception as e:
                 logger.error("Error in Penny Telegram dispatch worker: %s", e)
-                time.sleep(1.5)
+                time.sleep(2.0)
 
     def format_message(self, event: ExtremeEvent) -> str:
         """Create a human-readable Telegram message for stock or option alerts with tiered severity."""
@@ -288,13 +304,13 @@ class TelegramNotifier:
 
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         try:
-            response = requests.post(
+            response = self._session.post(
                 url,
                 json={
                     "chat_id": chat_id,
                     "text": self.format_message(event),
                 },
-                timeout=10,
+                timeout=12,
             )
             if response.status_code == 429:
                 retry_after = 5
@@ -302,9 +318,17 @@ class TelegramNotifier:
                     retry_after = int(response.json().get("parameters", {}).get("retry_after", 5))
                 except Exception:
                     pass
-                logger.warning("Telegram 429 rate limit hit (%s). Pausing for %ds", channel_type, retry_after)
-                time.sleep(retry_after)
-                return False
+                logger.warning("Telegram 429 rate limit hit (%s). Pausing for %ds before retry...", channel_type, retry_after)
+                time.sleep(retry_after + 1)
+                retry_res = self._session.post(
+                    url,
+                    json={
+                        "chat_id": chat_id,
+                        "text": self.format_message(event),
+                    },
+                    timeout=12,
+                )
+                return bool(retry_res.status_code == 200)
 
             response.raise_for_status()
             return bool(response.json().get("ok"))
@@ -346,7 +370,7 @@ class TelegramNotifier:
             raise RuntimeError("Primary Stock Telegram credentials missing in Secrets or .env (TELEGRAM_BOT_TOKEN & TELEGRAM_CHAT_ID)")
 
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
-        response = requests.post(
+        response = self._session.post(
             url,
             json={
                 "chat_id": self.chat_id,
@@ -368,7 +392,7 @@ class TelegramNotifier:
             raise RuntimeError("Index Telegram credentials missing in Secrets or .env (TELEGRAM_INDEX_CHAT_ID)")
 
         url = f"https://api.telegram.org/bot{self.index_bot_token}/sendMessage"
-        response = requests.post(
+        response = self._session.post(
             url,
             json={
                 "chat_id": self.index_chat_id,
@@ -390,7 +414,7 @@ class TelegramNotifier:
             raise RuntimeError("Penny Telegram credentials missing in Secrets or .env (TELEGRAM_PENNY_CHAT_ID)")
 
         url = f"https://api.telegram.org/bot{self.penny_bot_token}/sendMessage"
-        response = requests.post(
+        response = self._session.post(
             url,
             json={
                 "chat_id": self.penny_chat_id,
