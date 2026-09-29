@@ -432,7 +432,7 @@ if pinned_list:
             st.toast("🗑️ Cleared all pinned trades!", icon="📌")
             st.rerun()
 
-    for item in pinned_list:
+    for idx, item in enumerate(pinned_list):
         # Query latest live price from state_manager
         obs = state_manager.get_latest(item.instrument_key)
         if obs and obs.price > 0:
@@ -493,7 +493,7 @@ if pinned_list:
             st.markdown(pinned_card_html, unsafe_allow_html=True)
         with p_action_col:
             st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
-            if st.button("❌ Remove", key=f"unpin_btn_{item.instrument_key}", width='stretch', help="Remove from pinned watchlist"):
+            if st.button("❌ Remove", key=f"unpin_btn_{item.instrument_key}_{idx}", width='stretch', help="Remove from pinned watchlist"):
                 if hasattr(engine, "unpin_trade"):
                     engine.unpin_trade(item.instrument_key)
                 st.toast(f"Removed {item.display_title} from pinned trades.", icon="❌")
@@ -534,7 +534,7 @@ def render_alert_cards(alert_list: list[ExtremeEvent], tab_key: str, empty_msg: 
     elif selected_dir_filter == "DOWN (-)":
         filtered = [e for e in filtered if e.direction.value == "DOWN"]
 
-    for event in filtered[:15]:
+    for idx, event in enumerate(filtered[:15]):
         is_up = event.direction.value == "UP"
         if is_up:
             card_class = "alert-card-up"
@@ -591,12 +591,13 @@ def render_alert_cards(alert_list: list[ExtremeEvent], tab_key: str, empty_msg: 
         with btn_col:
             st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
             key_id = event.instrument_key or event.symbol
+            ts_str = int(event.current_timestamp.timestamp())
             pinned_map = getattr(engine, "pinned_trades", {})
             is_pinned = key_id in pinned_map
             if is_pinned:
-                st.button("📌 Pinned", key=f"pinned_badge_{tab_key}_{key_id}_{event.threshold}", disabled=True, width='stretch')
+                st.button("📌 Pinned", key=f"pinned_badge_{tab_key}_{key_id}_{event.threshold}_{ts_str}_{idx}", disabled=True, width='stretch')
             else:
-                if st.button("📌 Pin", key=f"pin_action_{tab_key}_{key_id}_{event.threshold}", width='stretch', help="Lock trade to Pinned Active Watchlist"):
+                if st.button("📌 Pin", key=f"pin_action_{tab_key}_{key_id}_{event.threshold}_{ts_str}_{idx}", width='stretch', help="Lock trade to Pinned Active Watchlist"):
                     if hasattr(engine, "pin_trade"):
                         engine.pin_trade(event)
                     st.toast(f"📌 Pinned {event.display_title} to Active Watchlist!", icon="🎯")
