@@ -218,9 +218,32 @@ FNO_STOCKS = [
 ]
 
 
-def get_symbols() -> list[str]:
-    """Return the NSE symbols used by the monitoring/data-provider layer."""
+INDEX_UNIVERSE = [
+    {"name": "NIFTY 50 Index", "symbol": "NIFTY", "exchange": "NSE", "strike_step": 50.0},
+    {"name": "S&P BSE SENSEX Index", "symbol": "SENSEX", "exchange": "BSE", "strike_step": 100.0},
+]
+
+INDEX_SYMBOLS: set[str] = {"NIFTY", "SENSEX"}
+
+
+def is_index_symbol(symbol: str) -> bool:
+    """Return True if the symbol is a market index (NIFTY or SENSEX)."""
+    return symbol.upper() in INDEX_SYMBOLS
+
+
+def get_index_symbols() -> list[str]:
+    """Return the list of monitored index symbols."""
+    return [idx["symbol"] for idx in INDEX_UNIVERSE]
+
+
+def get_stock_symbols() -> list[str]:
+    """Return the 210 F&O underlying stock symbols."""
     return [stock["symbol"] for stock in FNO_STOCKS]
+
+
+def get_symbols() -> list[str]:
+    """Return the complete monitoring symbol universe (indices + 210 stocks)."""
+    return get_index_symbols() + get_stock_symbols()
 
 
 def validate_stocks() -> list[str]:
@@ -230,7 +253,7 @@ def validate_stocks() -> list[str]:
     if len(FNO_STOCKS) != 210:
         errors.append(f"Expected 210 stocks, found {len(FNO_STOCKS)}.")
 
-    symbols = get_symbols()
+    symbols = get_stock_symbols()
 
     if len(symbols) != len(set(symbols)):
         duplicates = sorted({s for s in symbols if symbols.count(s) > 1})

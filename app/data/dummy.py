@@ -10,8 +10,15 @@ from app.stocks import get_symbols
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
-def get_strike_interval(price: float) -> float:
-    """Determine realistic NSE strike interval based on stock price."""
+def get_strike_interval(price: float, symbol: str | None = None) -> float:
+    """Determine realistic NSE/BSE strike interval based on stock price or index symbol."""
+    if symbol:
+        sym_upper = symbol.upper()
+        if sym_upper == "NIFTY":
+            return 50.0
+        if sym_upper == "SENSEX":
+            return 100.0
+
     if price < 150:
         return 2.5
     if price < 300:
@@ -27,7 +34,7 @@ def get_strike_interval(price: float) -> float:
 
 class DummyMarketDataProvider(MarketDataProvider):
     """
-    Simulates a real-time Option Chain market-data stream for 210 F&O stocks.
+    Simulates a real-time Option Chain market-data stream for 210 F&O stocks + NIFTY & SENSEX.
     Generates Call (CE) and Put (PE) strike ladders around ATM.
     Supports autonomous multi-stock extreme surge/plunge events.
     """
@@ -47,13 +54,16 @@ class DummyMarketDataProvider(MarketDataProvider):
         self.expiry_date = expiry_date
         self.enable_random_spikes = enable_random_spikes
 
-
-        # Initial spot prices for 210 stocks
+        # Initial spot prices for 210 stocks + indices
         random.seed(42)  # Consistent baseline across runs
-        self.spot_prices: dict[str, float] = {
-            symbol: round(random.uniform(150.0, 3500.0), 2)
-            for symbol in self.symbols
-        }
+        self.spot_prices: dict[str, float] = {}
+        for symbol in self.symbols:
+            if symbol == "NIFTY":
+                self.spot_prices[symbol] = 25150.00
+            elif symbol == "SENSEX":
+                self.spot_prices[symbol] = 82400.00
+            else:
+                self.spot_prices[symbol] = round(random.uniform(150.0, 3500.0), 2)
 
         # Baseline option premiums dictionary: instrument_key -> float
         self.premiums: dict[str, float] = {}
@@ -84,7 +94,7 @@ class DummyMarketDataProvider(MarketDataProvider):
         """Create baseline Option Chain strikes for all stocks."""
         for symbol in self.symbols:
             spot = self.spot_prices[symbol]
-            interval = get_strike_interval(spot)
+            interval = get_strike_interval(spot, symbol)
             atm_strike = round(spot / interval) * interval
 
             symbol_strikes = []
@@ -125,7 +135,7 @@ class DummyMarketDataProvider(MarketDataProvider):
         if symbol in self.strikes:
             return self.strikes[symbol]
         spot = self.spot_prices.get(symbol, 1000.0)
-        interval = get_strike_interval(spot)
+        interval = get_strike_interval(spot, symbol)
         atm_strike = round(spot / interval) * interval
         return sorted([
             atm_strike + (offset * interval)

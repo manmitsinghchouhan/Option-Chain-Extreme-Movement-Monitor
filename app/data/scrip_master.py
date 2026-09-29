@@ -61,14 +61,21 @@ class DhanScripMaster:
 
         target_symbols = set(get_symbols())
 
-        # Filter for NSE Derivatives Options (OPTSTK & OPTIDX)
+        # Filter for Derivatives Options: NSE (OPTSTK & OPTIDX) and BSE (OPTIDX for SENSEX)
         fno_df = self.df[
-            (self.df["SEM_EXM_EXCH_ID"] == "NSE")
-            & (self.df["SEM_SEGMENT"] == "D")
-            & (self.df["SEM_INSTRUMENT_NAME"].isin(["OPTSTK", "OPTIDX"]))
+            (
+                (self.df["SEM_EXM_EXCH_ID"] == "NSE")
+                & (self.df["SEM_SEGMENT"] == "D")
+                & (self.df["SEM_INSTRUMENT_NAME"].isin(["OPTSTK", "OPTIDX"]))
+            )
+            | (
+                (self.df["SEM_EXM_EXCH_ID"] == "BSE")
+                & (self.df["SEM_SEGMENT"] == "D")
+                & (self.df["SEM_INSTRUMENT_NAME"] == "OPTIDX")
+            )
         ].copy()
 
-        # Extract underlying symbol from SEM_CUSTOM_SYMBOL (e.g. 'RELIANCE 2500 CE' -> 'RELIANCE')
+        # Extract underlying symbol from SEM_CUSTOM_SYMBOL (e.g. 'RELIANCE 2500 CE' -> 'RELIANCE', 'SENSEX 82000 CE' -> 'SENSEX')
         fno_df["UNDERLYING"] = (
             fno_df["SEM_CUSTOM_SYMBOL"].astype(str).str.split().str[0].str.strip()
         )
@@ -80,7 +87,28 @@ class DhanScripMaster:
 
         now_str = datetime.now().strftime("%Y-%m-%d")
 
-        # Build lookup for equity spot cash security IDs (NSE Cash segment = 'E')
+        # 1. Register Index Spot cash security IDs (NSE Sec 19 for NIFTY, BSE Sec 51 for SENSEX)
+        if "NIFTY" in target_symbols:
+            self.security_id_map[19] = {
+                "security_id": 19,
+                "symbol": "NIFTY",
+                "is_equity": True,
+                "is_index": True,
+                "trading_symbol": "NIFTY 50",
+            }
+            subscription_list.append((0, "19", 17))
+
+        if "SENSEX" in target_symbols:
+            self.security_id_map[51] = {
+                "security_id": 51,
+                "symbol": "SENSEX",
+                "is_equity": True,
+                "is_index": True,
+                "trading_symbol": "SENSEX",
+            }
+            subscription_list.append((0, "51", 17))
+
+        # 2. Build lookup for equity spot cash security IDs (NSE Cash segment = 'E')
         eq_df = self.df[
             (self.df["SEM_EXM_EXCH_ID"] == "NSE")
             & (self.df["SEM_SEGMENT"] == "E")
@@ -90,7 +118,7 @@ class DhanScripMaster:
 
         # For each symbol, subscribe to equity cash spot tick and options around ATM
         for symbol, group in matched_df.groupby("UNDERLYING"):
-            # Subscribe to underlying equity cash spot tick
+            # Subscribe to underlying equity cash spot tick for stocks
             if symbol in equity_map:
                 eq_sec_id = equity_map[symbol]
                 if eq_sec_id not in self.security_id_map:
@@ -143,6 +171,8 @@ class DhanScripMaster:
                 opt_type = OptionType.CE if opt_type_str == "CE" else OptionType.PE
                 strike_val = float(row["STRIKE"])
                 expiry_str = str(row["SEM_EXPIRY_DATE"]).split()[0]
+                exch_name = str(row.get("SEM_EXM_EXCH_ID", "NSE")).strip().upper()
+                exch_segment_code = 8 if exch_name == "BSE" else 2
 
                 meta = {
                     "security_id": sec_id,
@@ -151,20 +181,26 @@ class DhanScripMaster:
                     "option_type": opt_type,
                     "expiry": expiry_str,
                     "trading_symbol": str(row["SEM_TRADING_SYMBOL"]),
+                    "exchange": exch_name,
                 }
 
                 self.security_id_map[sec_id] = meta
                 symbol_items.append(meta)
 
-                # NSE_FNO code is 2, Quote request code is 17
-                subscription_list.append((2, str(sec_id), 17))
+                # NSE_FNO code is 2, BSE_FNO code is 8, Quote request code is 17
+                subscription_list.append((exch_segment_code, str(sec_id), 17))
 
             self.symbol_instruments[symbol] = symbol_items
 
         return subscription_list
 
     def get_equity_security_id(self, symbol: str) -> int | None:
-        """Find NSE equity cash security ID for a symbol."""
+        """Find equity or index cash security ID for a symbol."""
+        if symbol == "NIFTY":
+            return 19
+        if symbol == "SENSEX":
+            return 51
+
         if self.df is None:
             self.fetch_master()
 

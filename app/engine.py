@@ -65,10 +65,21 @@ class MonitorEngine:
         self._load_pinned_trades()
 
     @property
-    def core_alerts(self) -> list[ExtremeEvent]:
-        """High-conviction core crashes with start premium >= ₹1.00."""
+    def stock_alerts(self) -> list[ExtremeEvent]:
+        """High-conviction stock option crashes (>= ₹1.00, non-index)."""
         with self.lock:
-            return [e for e in self.recent_alerts if not e.is_penny_decay]
+            return [e for e in self.recent_alerts if not e.is_penny_decay and str(e.symbol).upper() not in ("NIFTY", "SENSEX")]
+
+    @property
+    def index_alerts(self) -> list[ExtremeEvent]:
+        """High-conviction index option crashes (NIFTY & SENSEX >= ₹1.00)."""
+        with self.lock:
+            return [e for e in self.recent_alerts if not e.is_penny_decay and str(e.symbol).upper() in ("NIFTY", "SENSEX")]
+
+    @property
+    def core_alerts(self) -> list[ExtremeEvent]:
+        """Backward-compatibility alias for stock_alerts."""
+        return self.stock_alerts
 
     @property
     def penny_alerts(self) -> list[ExtremeEvent]:

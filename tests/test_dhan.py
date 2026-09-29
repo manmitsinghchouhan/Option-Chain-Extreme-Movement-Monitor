@@ -52,7 +52,9 @@ class TestDhanScripMaster(unittest.TestCase):
         subscriptions = sm.load_fno_universe(strikes_above_below=1)
 
         self.assertGreater(len(subscriptions), 0)
-        self.assertEqual(subscriptions[0][0], 2)  # Segment code 2 (NSE_FNO)
+        # Verify NSE_FNO segment (2) is present in subscriptions
+        fno_subs = [s for s in subscriptions if s[0] == 2]
+        self.assertGreater(len(fno_subs), 0)
         self.assertIn(100001, sm.security_id_map)
         self.assertEqual(sm.security_id_map[100001]["symbol"], "RELIANCE")
         self.assertEqual(sm.security_id_map[100001]["option_type"], OptionType.CE)

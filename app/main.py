@@ -88,6 +88,25 @@ def sync_secrets_to_env() -> list[str]:
     return detected_keys
 
 
+def reload_all_secrets_and_reconnect() -> None:
+    """Reload secrets from Streamlit secrets / .env, update providers, and reconnect live feeds."""
+    sync_secrets_to_env()
+    client_id = os.getenv("DHAN_CLIENT_ID", "")
+    access_token = os.getenv("DHAN_ACCESS_TOKEN", "")
+    if access_token and hasattr(engine, "update_dhan_credentials"):
+        engine.update_dhan_credentials(client_id, access_token)
+    elif engine.dhan_provider:
+        engine.dhan_provider.access_token = access_token
+        engine.dhan_provider.client_id = client_id
+        engine.dhan_provider.last_error = None
+
+    if hasattr(notifier, "_bot_token"):
+        notifier._bot_token = None
+        notifier._chat_id = None
+        notifier._penny_bot_token = None
+        notifier._penny_chat_id = None
+
+
 detected_secret_keys = sync_secrets_to_env()
 
 st.set_page_config(
@@ -219,6 +238,12 @@ if is_dhan_mode:
         st.sidebar.info(f"📊 F&O Universe: {len(all_symbols)} Stocks")
         st.sidebar.caption("⚡ Live WebSocket: wss://api-feed.dhan.co")
 
+    if st.sidebar.button("🔄 Reload Cloud Secrets & Reconnect", width='stretch', key="reload_secrets_top_btn", help="Click after updating Streamlit Cloud Secrets (or .env) to apply new tokens instantly without rebooting"):
+        reload_all_secrets_and_reconnect()
+        st.toast("🔄 Cloud Secrets reloaded! DhanHQ & Telegram reconnected.", icon="🔑")
+        st.sidebar.success("✅ Secrets reloaded successfully!")
+        st.rerun()
+
     with st.sidebar.expander("🔑 Daily Access Token Updater"):
         new_token_input = st.text_input("Dhan Access Token", type="password", key="daily_token_input", help="Paste today's access token from dhanhq.co")
         cid_needed = not bool(os.getenv("DHAN_CLIENT_ID"))
@@ -245,19 +270,34 @@ st.sidebar.subheader("📱 Telegram Alerts")
 # 1. Primary Core Bot (>= ₹1.00)
 is_core_configured = hasattr(notifier, "is_configured") and notifier.is_configured()
 if is_core_configured:
-    st.sidebar.success("🟢 Primary Bot (Core ≥₹1.00): Connected")
-    if st.sidebar.button("🔔 Test Core Bot Alert", width='stretch'):
+    st.sidebar.success("🟢 Stock Bot (Core ≥₹1.00): Connected")
+    if st.sidebar.button("🔔 Test Stock Bot Alert", width='stretch'):
         try:
             if hasattr(notifier, "send_test_message"):
                 notifier.send_test_message()
-            st.toast("✅ Test alert sent to Primary Core channel!", icon="📱")
-            st.sidebar.success("✅ Primary bot test alert sent!")
+            st.toast("✅ Test alert sent to Stock channel!", icon="📱")
+            st.sidebar.success("✅ Stock bot test alert sent!")
         except Exception as e:
-            st.sidebar.error(f"Core Bot error: {e}")
+            st.sidebar.error(f"Stock Bot error: {e}")
 else:
-    st.sidebar.caption("📱 Core Bot: Not configured (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`)")
+    st.sidebar.caption("📱 Stock Bot: Not configured (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`)")
 
-# 2. Expiry Penny Bot (< ₹1.00)
+# 2. Dedicated Index Bot (NIFTY & SENSEX)
+is_index_configured = hasattr(notifier, "is_index_configured") and notifier.is_index_configured()
+if is_index_configured:
+    st.sidebar.success("🎯 Index Bot (Nifty/Sensex): Connected")
+    if st.sidebar.button("🎯 Test Index Bot Alert", width='stretch'):
+        try:
+            if hasattr(notifier, "send_test_index_message"):
+                notifier.send_test_index_message()
+            st.toast("✅ Test alert sent to Index channel!", icon="🎯")
+            st.sidebar.success("✅ Index bot test alert sent!")
+        except Exception as e:
+            st.sidebar.error(f"Index Bot error: {e}")
+else:
+    st.sidebar.caption("🎯 Index Bot: Inactive (`TELEGRAM_INDEX_CHAT_ID` not set, routes to Stock bot)")
+
+# 3. Expiry Penny Bot (< ₹1.00)
 is_penny_configured = hasattr(notifier, "is_penny_configured") and notifier.is_penny_configured()
 if is_penny_configured:
     st.sidebar.success("📉 Expiry Bot (Penny <₹1.00): Connected")
@@ -272,9 +312,9 @@ if is_penny_configured:
 else:
     st.sidebar.caption("📉 Penny Bot: Inactive (`TELEGRAM_PENNY_CHAT_ID` not set)")
 
-if not is_core_configured or not is_penny_configured:
-    if st.sidebar.button("🔄 Reload Cloud Secrets", width='stretch', help="Click to reload secrets from Streamlit settings without rebooting"):
-        sync_secrets_to_env()
+if not is_core_configured or not is_index_configured or not is_penny_configured:
+    if st.sidebar.button("🔄 Reload Telegram Secrets", width='stretch', help="Click to reload Telegram bot secrets from Streamlit settings without rebooting"):
+        reload_all_secrets_and_reconnect()
         st.toast("🔄 Cloud secrets reloaded!", icon="🔑")
         st.rerun()
 
@@ -294,14 +334,15 @@ refresh_speed = st.sidebar.selectbox(
 is_market_open, market_session_status = check_market_session_ist()
 
 total_contracts = len(all_symbols) * 18
-core_alerts_list = engine.core_alerts
-penny_alerts_list = engine.penny_alerts
+stock_alerts_list = getattr(engine, "stock_alerts", engine.core_alerts)
+index_alerts_list = getattr(engine, "index_alerts", [])
+penny_alerts_list = getattr(engine, "penny_alerts", [])
 
 h_col1, h_col2 = st.columns([3, 1])
 with h_col1:
     st.markdown('<h1 class="main-header">⚡ F&O Option Chain Extreme Movement Monitor</h1>', unsafe_allow_html=True)
     mode_text = "DhanHQ Live Real-Time Feed" if is_dhan_mode else "Offline Simulation Mode"
-    st.caption(f"Scanner [{mode_text}] — Monitoring 210 F&O Stocks for -60%, -70%, -80% Down Spikes & Crashes")
+    st.caption(f"Scanner [{mode_text}] — Monitoring 210 F&O Stocks + NIFTY 50 & SENSEX for -60%, -70%, -80% Crashes")
 with h_col2:
     if is_dhan_mode:
         if not is_market_open:
@@ -316,17 +357,19 @@ with h_col2:
         else:
             st.markdown('<div style="text-align: right; margin-top: 15px;"><span class="live-badge live-paused">⏸️ STREAM PAUSED</span></div>', unsafe_allow_html=True)
 
-col1, col2, col3, col4, col5 = st.columns(5)
+col1, col2, col3, col4, col5, col6 = st.columns(6)
 with col1:
-    st.metric("F&O Stocks Tracked", f"{len(all_symbols)} Stocks")
+    st.metric("Universe Tracked", f"{len(all_symbols)} Instruments")
 with col2:
     st.metric("Option Contracts", f"{total_contracts:,} CE/PE")
 with col3:
     st.metric("Alert Thresholds", "-60%, -70%, -80%")
 with col4:
-    st.metric("🚨 Core Crashes (≥₹1.00)", f"{len(core_alerts_list)}")
+    st.metric("🚨 Stock Crashes", f"{len(stock_alerts_list)}")
 with col5:
-    st.metric("📉 Penny Decay (<₹1.00)", f"{len(penny_alerts_list)}")
+    st.metric("🎯 Index Crashes", f"{len(index_alerts_list)}")
+with col6:
+    st.metric("📉 Penny Decay", f"{len(penny_alerts_list)}")
 
 st.divider()
 
@@ -507,8 +550,9 @@ st.divider()
 
 st.subheader("🚨 Live Extreme Option Alerts")
 
-tab_core, tab_penny = st.tabs([
-    f"🚨 Core Option Crashes (≥ ₹1.00) — [{len(core_alerts_list)}]",
+tab_stocks, tab_indices, tab_penny = st.tabs([
+    f"🚨 Core Stock Crashes (≥ ₹1.00) — [{len(stock_alerts_list)}]",
+    f"🎯 Index Option Crashes (NIFTY & SENSEX) — [{len(index_alerts_list)}]",
     f"📉 Expiry Penny Decay (< ₹1.00) — [{len(penny_alerts_list)}]",
 ])
 
@@ -520,7 +564,7 @@ def render_alert_cards(alert_list: list[ExtremeEvent], tab_key: str, empty_msg: 
     f_col1, f_col2 = st.columns([1, 1])
     with f_col1:
         symbols_in_tab = sorted(list({e.symbol for e in alert_list}))
-        selected_stock_filter = st.selectbox("Filter by Stock", ["ALL"] + symbols_in_tab, key=f"filter_stock_{tab_key}")
+        selected_stock_filter = st.selectbox("Filter by Symbol", ["ALL"] + symbols_in_tab, key=f"filter_stock_{tab_key}")
     with f_col2:
         selected_dir_filter = st.selectbox("Filter by Direction", ["ALL", "UP (+)", "DOWN (-)"], key=f"filter_dir_{tab_key}")
 
@@ -601,15 +645,23 @@ def render_alert_cards(alert_list: list[ExtremeEvent], tab_key: str, empty_msg: 
                     st.toast(f"📌 Pinned {event.display_title} to Active Watchlist!", icon="🎯")
                     st.rerun()
 
-with tab_core:
+with tab_stocks:
     render_alert_cards(
-        core_alerts_list,
-        tab_key="core",
-        empty_msg="No core high-value option crashes (≥ ₹1.00) detected yet.",
+        stock_alerts_list,
+        tab_key="stocks",
+        empty_msg="No core high-value stock option crashes (≥ ₹1.00) detected yet.",
+    )
+
+with tab_indices:
+    st.caption("🎯 **Index Options Stream:** Dedicated high-liquidity monitor for NIFTY 50 and SENSEX option premium crashes.")
+    render_alert_cards(
+        index_alerts_list,
+        tab_key="indices",
+        empty_msg="No NIFTY or SENSEX index option crashes (≥ ₹1.00) detected yet.",
     )
 
 with tab_penny:
-    st.caption("📉 **Expiry Penny Stream:** Tracks sub-₹1.00 options decaying towards zero near monthly expiry.")
+    st.caption("📉 **Expiry Penny Stream:** Tracks sub-₹1.00 options decaying towards zero near weekly/monthly expiry.")
     render_alert_cards(
         penny_alerts_list,
         tab_key="penny",

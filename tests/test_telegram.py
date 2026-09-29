@@ -134,3 +134,42 @@ def test_telegram_tiered_severity_headers():
     msg80 = notifier.format_message(e80)
     assert "CRITICAL CRASH -80%" in msg80
     assert "🔴" in msg80
+
+
+def test_telegram_index_options_routing():
+    from app.data.models import OptionType
+
+    index_event = ExtremeEvent(
+        symbol="NIFTY",
+        direction=MovementDirection.DOWN,
+        threshold=80.0,
+        percentage_change=-85.0,
+        start_price=150.0,
+        current_price=22.5,
+        start_timestamp=datetime(2026, 9, 2, 10, 0),
+        current_timestamp=datetime(2026, 9, 2, 10, 45),
+        duration_seconds=45 * 60,
+        strike_price=25000.0,
+        option_type=OptionType.PE,
+        expiry="2026-10-01",
+    )
+
+    assert index_event.is_index is True
+    assert index_event.is_penny_decay is False
+
+    notifier = TelegramNotifier(
+        bot_token="core-token",
+        chat_id="core-chat",
+        index_bot_token="index-token",
+        index_chat_id="index-chat",
+        penny_bot_token="penny-token",
+        penny_chat_id="penny-chat",
+    )
+
+    msg = notifier.format_message(index_event)
+    assert "CRITICAL CRASH -80%" in msg
+    assert "EXTREME INDEX MOVEMENT DETECTED" in msg
+    assert "NIFTY 25000 PE" in msg
+    assert notifier.is_index_configured() is True
+    assert notifier.is_configured() is True
+    assert notifier.is_penny_configured() is True

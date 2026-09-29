@@ -39,6 +39,12 @@ class ExtremeEvent:
         return self.option_type is not None and self.strike_price > 0
 
     @property
+    def is_index(self) -> bool:
+        """True if event is on an Index Option or Index Spot contract."""
+        from app.stocks import is_index_symbol
+        return is_index_symbol(self.symbol)
+
+    @property
     def is_penny_decay(self) -> bool:
         """True if contract started at a penny level (< ₹1.00), typical of expiry decay."""
         return self.is_option and self.start_price < PENNY_PREMIUM_THRESHOLD
