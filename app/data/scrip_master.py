@@ -87,16 +87,16 @@ class DhanScripMaster:
 
         now_str = datetime.now().strftime("%Y-%m-%d")
 
-        # 1. Register Index Spot cash security IDs (NSE Sec 19 for NIFTY, BSE Sec 51 for SENSEX)
+        # 1. Register Index Spot cash security IDs (NSE Sec 13 for NIFTY, BSE Sec 51 for SENSEX)
         if "NIFTY" in target_symbols:
-            self.security_id_map[19] = {
-                "security_id": 19,
+            self.security_id_map[13] = {
+                "security_id": 13,
                 "symbol": "NIFTY",
                 "is_equity": True,
                 "is_index": True,
                 "trading_symbol": "NIFTY 50",
             }
-            subscription_list.append((0, "19", 17))
+            subscription_list.append((0, "13", 17))
 
         if "SENSEX" in target_symbols:
             self.security_id_map[51] = {
@@ -197,9 +197,9 @@ class DhanScripMaster:
     def get_equity_security_id(self, symbol: str) -> int | None:
         """Find equity or index cash security ID for a symbol."""
         if symbol == "NIFTY":
-            return 19
+            return 13
         if symbol == "SENSEX":
-            return 51
+            return 1
 
         if self.df is None:
             self.fetch_master()

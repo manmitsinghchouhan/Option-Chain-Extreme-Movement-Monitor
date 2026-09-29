@@ -180,7 +180,10 @@ class DhanMarketDataProvider(MarketDataProvider):
             ctx = DhanContext(client_id=self.client_id, access_token=self.access_token)
             dhan = dhanhq(ctx)
 
-            exp_res = dhan.expiry_list(sec_id, "NSE_FNO")
+            exch_segment = "BSE_FNO" if symbol == "SENSEX" else "NSE_FNO"
+            exch_segment_code = 8 if symbol == "SENSEX" else 2
+
+            exp_res = dhan.expiry_list(sec_id, exch_segment)
             if not exp_res or exp_res.get("status") != "success":
                 err_msg = str(exp_res.get("remarks") or exp_res.get("error") or "") if exp_res else "No response"
                 if "auth" in err_msg.lower() or "token" in err_msg.lower() or not exp_res:
@@ -199,7 +202,7 @@ class DhanMarketDataProvider(MarketDataProvider):
                 return None
 
             nearest_expiry = expiries[0]
-            chain_res = dhan.option_chain(sec_id, "NSE_FNO", nearest_expiry)
+            chain_res = dhan.option_chain(sec_id, exch_segment, nearest_expiry)
             if not chain_res or chain_res.get("status") != "success":
                 return None
 
@@ -268,7 +271,7 @@ class DhanMarketDataProvider(MarketDataProvider):
                         "expiry": nearest_expiry,
                         "trading_symbol": f"{symbol} {strike_val:.0f} CE",
                     }
-                    new_sub_instruments.append((2, str(ce_id), 17))
+                    new_sub_instruments.append((exch_segment_code, str(ce_id), 17))
 
                 if item.get("pe_sec_id"):
                     pe_id = int(item["pe_sec_id"])
@@ -280,7 +283,7 @@ class DhanMarketDataProvider(MarketDataProvider):
                         "expiry": nearest_expiry,
                         "trading_symbol": f"{symbol} {strike_val:.0f} PE",
                     }
-                    new_sub_instruments.append((2, str(pe_id), 17))
+                    new_sub_instruments.append((exch_segment_code, str(pe_id), 17))
 
             # Also register and dynamically subscribe equity cash security ID for live spot updates
             eq_sec_id = self.scrip_master.get_equity_security_id(symbol)
@@ -320,14 +323,8 @@ class DhanMarketDataProvider(MarketDataProvider):
         from dhanhq import DhanContext, MarketFeed
         import threading
 
-        logger.info("Initializing Dhan Scrip Master for background live feed...")
-        instruments = self.scrip_master.load_fno_universe(
-            strikes_above_below=self.strikes_above_below
-        )
-        logger.info("Subscribing to %d option & equity contracts...", len(instruments))
-
-        ctx = DhanContext(client_id=self.client_id, access_token=self.access_token)
         self._running = True
+        self.last_error = None
 
         def _packet_handler(instance, packet: dict):
             if not self._running or not isinstance(packet, dict):
@@ -392,15 +389,22 @@ class DhanMarketDataProvider(MarketDataProvider):
             except Exception as e:
                 logger.error("Error in background feed packet handler: %s", e)
 
-        self._feed = MarketFeed(
-            dhan_context=ctx,
-            instruments=instruments,
-            version="v2",
-            on_message=_packet_handler,
-        )
-
         def _run_feed_safely():
             try:
+                logger.info("Initializing Dhan Scrip Master for background live feed...")
+                instruments = self.scrip_master.load_fno_universe(
+                    strikes_above_below=self.strikes_above_below
+                )
+                logger.info("Subscribing to %d option & equity contracts...", len(instruments))
+
+                ctx = DhanContext(client_id=self.client_id, access_token=self.access_token)
+                self._feed = MarketFeed(
+                    dhan_context=ctx,
+                    instruments=instruments,
+                    version="v2",
+                    on_message=_packet_handler,
+                )
+                logger.info("DhanHQ WebSocket connecting...")
                 self._feed.run()
             except Exception as e:
                 err_str = str(e).lower()
@@ -415,7 +419,7 @@ class DhanMarketDataProvider(MarketDataProvider):
 
         thread = threading.Thread(target=_run_feed_safely, daemon=True)
         thread.start()
-        logger.info("DhanHQ Live WebSocket background thread started safely.")
+        logger.info("DhanHQ Live WebSocket background thread started.")
 
     def stop(self) -> None:
         """Disconnect and stop live stream feed safely."""
