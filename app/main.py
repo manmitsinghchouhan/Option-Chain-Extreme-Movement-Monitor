@@ -399,19 +399,9 @@ if engine.is_streaming_active and not is_dhan_mode:
 # Top Market Movers Bar (Real-Time Scanner)
 # -------------------------------------------------------------------
 
-movers = []
-for symbol in all_symbols:
-    for key in state_manager.get_instruments_for_symbol(symbol):
-        hist = state_manager.get_history(key)
-        if len(hist) >= 2:
-            pct = ((hist[-1].price - hist[0].price) / hist[0].price) * 100
-            if abs(pct) >= 5.0:
-                parts = key.split("_")
-                readable = f"{parts[0]} {parts[2]} {parts[3]}"
-                movers.append((readable, pct, hist[-1].price))
+movers = state_manager.get_top_movers(limit=6, min_pct=5.0)
 
 if movers:
-    movers.sort(key=lambda x: abs(x[1]), reverse=True)
     st.markdown("**🔥 Top Moving Option Contracts (Rolling Window):**")
     mover_html = ""
     for name, pct, ltp in movers[:6]:

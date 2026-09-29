@@ -33,7 +33,7 @@ class MonitorEngine:
     """
 
     _instance: Optional["MonitorEngine"] = None
-    _singleton_lock: threading.Lock = threading.Lock()
+    _singleton_lock: threading.RLock = threading.RLock()
 
     @classmethod
     def get_instance(cls) -> "MonitorEngine":
@@ -45,7 +45,7 @@ class MonitorEngine:
         return cls._instance
 
     def __init__(self) -> None:
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.state_manager = StateManager(window_minutes=60)
         self.detector = ExtremeDetector(thresholds=(60.0, 70.0, 80.0), allow_up=False, allow_down=True)
         self.alert_manager = AlertManager()
@@ -118,16 +118,18 @@ class MonitorEngine:
                     new_alerts.append(event)
                     self.recent_alerts.insert(0, event)
 
+            highest_event = None
             if tick_new_alerts:
                 if len(self.recent_alerts) > 100:
                     self.recent_alerts = self.recent_alerts[:100]
-
-                # Dispatch highest severity threshold crossed in this tick to avoid message spam
                 highest_event = max(tick_new_alerts, key=lambda e: e.threshold)
-                try:
-                    self.notifier.send(highest_event)
-                except Exception as e:
-                    logger.error("Failed to send Telegram alert: %s", e)
+
+        # Dispatch outside the engine lock to prevent blocking live WebSocket & UI threads
+        if highest_event is not None:
+            try:
+                self.notifier.send(highest_event)
+            except Exception as e:
+                logger.error("Failed to send Telegram alert: %s", e)
 
         return new_alerts
 

@@ -114,6 +114,22 @@ class StateManager:
         """Return the number of underlying stocks tracked."""
         return len(self._symbol_instruments) or len(self._history)
 
+    def get_top_movers(self, limit: int = 6, min_pct: float = 5.0) -> list[tuple[str, float, float]]:
+        """Return top moving instruments efficiently via direct deque indexing."""
+        movers = []
+        for key, history in self._history.items():
+            if len(history) >= 2:
+                start_p = history[0].price
+                cur_p = history[-1].price
+                if start_p > 0:
+                    pct = ((cur_p - start_p) / start_p) * 100
+                    if abs(pct) >= min_pct:
+                        parts = key.split("_")
+                        readable = f"{parts[0]} {parts[2]} {parts[3]}" if len(parts) >= 4 else key
+                        movers.append((readable, pct, cur_p))
+        movers.sort(key=lambda x: abs(x[1]), reverse=True)
+        return movers[:limit]
+
     def clear(self) -> None:
         """Remove all stored market history."""
         self._history.clear()
