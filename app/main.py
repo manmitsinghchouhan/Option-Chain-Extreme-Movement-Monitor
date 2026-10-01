@@ -85,11 +85,24 @@ def sync_secrets_to_env() -> list[str]:
                     detected_keys.append(k)
     except Exception:
         pass
+
+    # Prioritize user's manual token entered in Daily Access Token Updater over expired secrets
+    if hasattr(st, "session_state"):
+        custom_tok = st.session_state.get("custom_dhan_access_token")
+        if custom_tok:
+            os.environ["DHAN_ACCESS_TOKEN"] = custom_tok
+        custom_cid = st.session_state.get("custom_dhan_client_id")
+        if custom_cid:
+            os.environ["DHAN_CLIENT_ID"] = custom_cid
+
     return detected_keys
 
 
 def reload_all_secrets_and_reconnect() -> None:
     """Reload secrets from Streamlit secrets / .env, update providers, and reconnect live feeds."""
+    if hasattr(st, "session_state"):
+        st.session_state.pop("custom_dhan_access_token", None)
+        st.session_state.pop("custom_dhan_client_id", None)
     sync_secrets_to_env()
     client_id = os.getenv("DHAN_CLIENT_ID", "")
     access_token = os.getenv("DHAN_ACCESS_TOKEN", "")
@@ -244,7 +257,7 @@ if is_dhan_mode:
         st.sidebar.success("✅ Secrets reloaded successfully!")
         st.rerun()
 
-    with st.sidebar.expander("🔑 Daily Access Token Updater"):
+    with st.sidebar.expander("🔑 Daily Access Token Updater", expanded=bool(engine.dhan_provider and engine.dhan_provider.last_error)):
         new_token_input = st.text_input("Dhan Access Token", type="password", key="daily_token_input", help="Paste today's access token from dhanhq.co")
         cid_needed = not bool(os.getenv("DHAN_CLIENT_ID"))
         new_cid_input = ""
@@ -254,7 +267,14 @@ if is_dhan_mode:
         if st.button("Apply & Connect", width='stretch', key="apply_daily_token"):
             tok = new_token_input.strip()
             cid = new_cid_input.strip() if cid_needed else os.getenv("DHAN_CLIENT_ID", "")
-            if tok and cid:
+            if tok:
+                if hasattr(st, "session_state"):
+                    st.session_state["custom_dhan_access_token"] = tok
+                    if cid:
+                        st.session_state["custom_dhan_client_id"] = cid
+                os.environ["DHAN_ACCESS_TOKEN"] = tok
+                if cid:
+                    os.environ["DHAN_CLIENT_ID"] = cid
                 engine.update_dhan_credentials(cid, tok)
                 st.toast("✅ DhanHQ credentials updated! Reconnecting...", icon="🔑")
                 st.rerun()
@@ -396,8 +416,9 @@ with ctrl1:
     if auto_stream_toggle != engine.is_streaming_active:
         if auto_stream_toggle:
             if is_dhan_mode:
-                load_dotenv(override=True)
+                sync_secrets_to_env()
                 engine.dhan_provider.access_token = os.getenv("DHAN_ACCESS_TOKEN", engine.dhan_provider.access_token)
+                engine.dhan_provider.last_error = None
                 engine.start_dhan_feed()
             else:
                 engine.is_streaming_active = True
@@ -695,7 +716,7 @@ chain_rows = []
 if is_dhan_mode and engine.dhan_provider:
     if selected_stock not in engine.cached_real_chains or refresh_snapshot:
         if refresh_snapshot:
-            load_dotenv(override=True)
+            sync_secrets_to_env()
             engine.dhan_provider.access_token = os.getenv("DHAN_ACCESS_TOKEN", engine.dhan_provider.access_token)
             engine.dhan_provider.last_error = None
         with st.spinner(f"Loading DhanHQ real option chain snapshot for {selected_stock}..."):
@@ -850,7 +871,6 @@ if engine.is_streaming_active:
     if is_dhan_mode:
         if engine.dhan_provider and engine.dhan_provider.last_error:
             engine.stop_dhan_feed()
-            st.rerun()
         elif is_market_open:
             time.sleep(refresh_speed)
             st.rerun()
