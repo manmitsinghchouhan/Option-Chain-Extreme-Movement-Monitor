@@ -1,11 +1,17 @@
-import asyncio
 import os
-import queue
 import sys
+from pathlib import Path
+
+# Ensure root directory is always in sys.path for Streamlit Cloud and subdirectory runners
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+import asyncio
+import queue
 import threading
 import time
 from datetime import datetime, timezone, timedelta, time as dt_time
-from pathlib import Path
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -40,10 +46,6 @@ def check_market_session_ist() -> tuple[bool, str]:
     
     return True, f"Live Trading Session ({now_ist.strftime('%I:%M %p')} IST)"
 
-# Ensure root directory is in sys.path for Streamlit Cloud and subdirectory runners
-ROOT_DIR = Path(__file__).resolve().parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
 
 import pandas as pd
 import streamlit as st
