@@ -23,19 +23,21 @@ logger = logging.getLogger(__name__)
 class DhanMarketDataProvider(MarketDataProvider):
     """
     Live real-time market data provider connecting to DhanHQ v2 WebSocket feed
-    for all 210 NSE F&O stocks and their option strike contracts.
+    for all 213 NSE F&O stocks and their option strike contracts.
     """
 
     def __init__(
         self,
         client_id: Optional[str] = None,
         access_token: Optional[str] = None,
-        strikes_above_below: int = 6,
+        strikes_above_below: int = 5,
+        index_strikes_above_below: int = 10,
     ) -> None:
         self.client_id = client_id or os.getenv("DHAN_CLIENT_ID", "")
         self.access_token = access_token or os.getenv("DHAN_ACCESS_TOKEN", "")
 
         self.strikes_above_below = strikes_above_below
+        self.index_strikes_above_below = index_strikes_above_below
         self.scrip_master = DhanScripMaster()
         self._running = False
         self._feed = None
@@ -129,10 +131,11 @@ class DhanMarketDataProvider(MarketDataProvider):
 
         logger.info("Initializing Dhan Scrip Master for F&O Universe...")
         instruments = self.scrip_master.load_fno_universe(
-            strikes_above_below=self.strikes_above_below
+            strikes_above_below=self.strikes_above_below,
+            index_strikes_above_below=self.index_strikes_above_below,
         )
         logger.info(
-            "Subscribing to %d option contracts across 210 F&O stocks...",
+            "Subscribing to %d option contracts across 213 F&O stocks & indices...",
             len(instruments),
         )
 
@@ -393,7 +396,8 @@ class DhanMarketDataProvider(MarketDataProvider):
             try:
                 logger.info("Initializing Dhan Scrip Master for background live feed...")
                 instruments = self.scrip_master.load_fno_universe(
-                    strikes_above_below=self.strikes_above_below
+                    strikes_above_below=self.strikes_above_below,
+                    index_strikes_above_below=self.index_strikes_above_below,
                 )
                 logger.info("Subscribing to %d option & equity contracts...", len(instruments))
 

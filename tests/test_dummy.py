@@ -23,7 +23,7 @@ def test_dummy_provider_loads_all_stocks():
     provider = DummyMarketDataProvider()
 
     assert len(provider.symbols) == len(get_symbols())
-    assert len(provider.symbols) == 212
+    assert len(provider.symbols) == 215
     assert provider.symbols == get_symbols()
 
 
@@ -31,7 +31,7 @@ def test_dummy_provider_has_starting_price_for_every_stock():
     provider = DummyMarketDataProvider()
 
     assert len(provider.prices) == len(get_symbols())
-    assert len(provider.prices) == 212
+    assert len(provider.prices) == 215
     assert all(price > 0 for price in provider.prices.values())
 
 

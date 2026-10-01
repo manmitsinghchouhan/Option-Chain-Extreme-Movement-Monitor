@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.data.base import MarketDataProvider
 from app.data.models import MarketTick, OptionTick, OptionType
-from app.stocks import get_symbols
+from app.stocks import get_symbols, is_index_symbol
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -42,7 +42,8 @@ class DummyMarketDataProvider(MarketDataProvider):
     def __init__(
         self,
         update_interval_seconds: float = 1.0,
-        strikes_above_below: int = 4,
+        strikes_above_below: int = 5,
+        index_strikes_above_below: int = 10,
         extreme_test_symbol: str | None = None,
         enable_random_spikes: bool = True,
         expiry_date: str = "2026-09-24",
@@ -50,11 +51,12 @@ class DummyMarketDataProvider(MarketDataProvider):
     ) -> None:
         self.update_interval_seconds = update_interval_seconds
         self.strikes_above_below = strikes_above_below
+        self.index_strikes_above_below = index_strikes_above_below
         self.symbols = get_symbols()
         self.expiry_date = expiry_date
         self.enable_random_spikes = enable_random_spikes
 
-        # Initial spot prices for 210 stocks + indices
+        # Initial spot prices for 213 stocks + indices
         random.seed(42)  # Consistent baseline across runs
         self.spot_prices: dict[str, float] = {}
         for symbol in self.symbols:
@@ -91,14 +93,15 @@ class DummyMarketDataProvider(MarketDataProvider):
         return self.spot_prices
 
     def _initialize_option_chain(self) -> None:
-        """Create baseline Option Chain strikes for all stocks."""
+        """Create baseline Option Chain strikes for all stocks and indices."""
         for symbol in self.symbols:
             spot = self.spot_prices[symbol]
             interval = get_strike_interval(spot, symbol)
             atm_strike = round(spot / interval) * interval
+            window = self.index_strikes_above_below if is_index_symbol(symbol) else self.strikes_above_below
 
             symbol_strikes = []
-            for offset in range(-self.strikes_above_below, self.strikes_above_below + 1):
+            for offset in range(-window, window + 1):
                 strike = atm_strike + (offset * interval)
                 if strike > 0:
                     symbol_strikes.append(strike)

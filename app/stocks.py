@@ -1,6 +1,6 @@
 """Fixed F&O stock universe used by V1.
 
-This list is intentionally static for V1. It contains the 210 stocks
+This list is intentionally static for V1. It contains the 213 stocks
 provided for this project and represents the underlying stocks we monitor.
 """
 
@@ -18,6 +18,7 @@ FNO_STOCKS = [
     {"name": 'Alkem Laboratories Limited', "symbol": 'ALKEM'},
     {"name": 'Amber Enterprises India Limited', "symbol": 'AMBER'},
     {"name": 'Ambuja Cements Limited', "symbol": 'AMBUJACEM'},
+    {"name": 'Anand Rathi Wealth Limited', "symbol": 'ANANDRATHI'},
     {"name": 'Angel One Limited', "symbol": 'ANGELONE'},
     {"name": 'Apollo Hospitals Enterprise Limited', "symbol": 'APOLLOHOSP'},
     {"name": 'Ashok Leyland Limited', "symbol": 'ASHOKLEY'},
@@ -177,6 +178,7 @@ FNO_STOCKS = [
     {"name": 'SRF Limited', "symbol": 'SRF'},
     {"name": 'Samvardhana Motherson International Limited', "symbol": 'MOTHERSON'},
     {"name": 'Shriram Finance Limited', "symbol": 'SHRIRAMFIN'},
+    {"name": 'Siemens Energy India Limited', "symbol": 'ENRIN'},
     {"name": 'Siemens Limited', "symbol": 'SIEMENS'},
     {"name": 'Solar Industries India Limited', "symbol": 'SOLARINDS'},
     {"name": 'Sona BLW Precision Forgings Limited', "symbol": 'SONACOMS'},
@@ -203,6 +205,7 @@ FNO_STOCKS = [
     {"name": 'Tube Investments of India Limited', "symbol": 'TIINDIA'},
     {"name": 'UNO Minda Limited', "symbol": 'UNOMINDA'},
     {"name": 'UPL Limited', "symbol": 'UPL'},
+    {"name": 'Ujjivan Small Finance Bank Limited', "symbol": 'UJJIVANSFB'},
     {"name": 'UltraTech Cement Limited', "symbol": 'ULTRACEMCO'},
     {"name": 'Union Bank of India', "symbol": 'UNIONBANK'},
     {"name": 'United Spirits Limited', "symbol": 'UNITDSPR'},
@@ -237,12 +240,12 @@ def get_index_symbols() -> list[str]:
 
 
 def get_stock_symbols() -> list[str]:
-    """Return the 210 F&O underlying stock symbols."""
+    """Return the 213 F&O underlying stock symbols."""
     return [stock["symbol"] for stock in FNO_STOCKS]
 
 
 def get_symbols() -> list[str]:
-    """Return the complete monitoring symbol universe (indices + 210 stocks)."""
+    """Return the complete monitoring symbol universe (indices + 213 stocks)."""
     return get_index_symbols() + get_stock_symbols()
 
 
@@ -250,8 +253,8 @@ def validate_stocks() -> list[str]:
     """Validate the fixed stock universe and return validation errors."""
     errors: list[str] = []
 
-    if len(FNO_STOCKS) != 210:
-        errors.append(f"Expected 210 stocks, found {len(FNO_STOCKS)}.")
+    if len(FNO_STOCKS) != 213:
+        errors.append(f"Expected 213 stocks, found {len(FNO_STOCKS)}.")
 
     symbols = get_stock_symbols()
 

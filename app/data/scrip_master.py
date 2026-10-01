@@ -47,11 +47,20 @@ class DhanScripMaster:
 
     def load_fno_universe(
         self,
-        strikes_above_below: int = 6,
+        strikes_above_below: int = 5,
+        index_strikes_above_below: int = 10,
+        spot_prices: dict[str, float] | None = None,
         force_refresh: bool = False,
     ) -> list[tuple[int, str, int]]:
         """
-        Filter Scrip Master for all 210 F&O stocks and build subscription list.
+        Filter Scrip Master for all 213 F&O stocks and 2 indices,
+        resolving exact At-The-Money (ATM) strike windows dynamically.
+
+        Args:
+            strikes_above_below: Number of strikes above/below ATM for stocks (default 5 = 11 strikes).
+            index_strikes_above_below: Number of strikes above/below ATM for indices (default 10 = 21 strikes).
+            spot_prices: Optional map of symbol -> live spot/cash price.
+            force_refresh: Force re-download of daily scrip master CSV.
 
         Returns:
             list of (exchange_segment, security_id, request_code)
@@ -154,10 +163,26 @@ class DhanScripMaster:
             if not unique_strikes:
                 continue
 
-            # Select ATM strikes (middle slice)
-            mid_idx = len(unique_strikes) // 2
-            start_idx = max(0, mid_idx - strikes_above_below)
-            end_idx = min(len(unique_strikes), mid_idx + strikes_above_below + 1)
+            # Determine ATM target spot price and strike window
+            is_index = symbol in ("NIFTY", "SENSEX")
+            window = index_strikes_above_below if is_index else strikes_above_below
+
+            target_spot = None
+            if spot_prices and symbol in spot_prices and spot_prices[symbol] > 0:
+                target_spot = spot_prices[symbol]
+            elif symbol == "NIFTY":
+                target_spot = 25800.0
+            elif symbol == "SENSEX":
+                target_spot = 84300.0
+
+            if target_spot is not None:
+                closest_strike = min(unique_strikes, key=lambda s: abs(s - target_spot))
+                atm_idx = unique_strikes.index(closest_strike)
+            else:
+                atm_idx = len(unique_strikes) // 2
+
+            start_idx = max(0, atm_idx - window)
+            end_idx = min(len(unique_strikes), atm_idx + window + 1)
             selected_strikes = set(unique_strikes[start_idx:end_idx])
 
             filtered_options = expiry_group[

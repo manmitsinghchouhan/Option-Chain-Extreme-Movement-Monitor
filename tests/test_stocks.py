@@ -11,9 +11,9 @@ from app.stocks import (
 
 
 def test_stock_count():
-    assert len(FNO_STOCKS) == 210
+    assert len(FNO_STOCKS) == 213
     assert len(INDEX_UNIVERSE) == 2
-    assert len(get_symbols()) == 212
+    assert len(get_symbols()) == 215
 
 
 def test_index_classification():
@@ -21,7 +21,7 @@ def test_index_classification():
     assert is_index_symbol("SENSEX") is True
     assert is_index_symbol("RELIANCE") is False
     assert get_index_symbols() == ["NIFTY", "SENSEX"]
-    assert len(get_stock_symbols()) == 210
+    assert len(get_stock_symbols()) == 213
 
 
 def test_stock_numbers_are_unique():

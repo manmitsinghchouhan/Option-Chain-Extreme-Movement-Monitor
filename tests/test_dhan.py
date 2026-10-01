@@ -59,6 +59,35 @@ class TestDhanScripMaster(unittest.TestCase):
         self.assertEqual(sm.security_id_map[100001]["symbol"], "RELIANCE")
         self.assertEqual(sm.security_id_map[100001]["option_type"], OptionType.CE)
 
+    def test_dynamic_atm_spot_matching(self):
+        # Create strikes 2400 to 3200 with step 100
+        rows = []
+        for strike in range(2400, 3300, 100):
+            rows.append({
+                "SEM_EXM_EXCH_ID": "NSE",
+                "SEM_SEGMENT": "D",
+                "SEM_INSTRUMENT_NAME": "OPTSTK",
+                "SEM_CUSTOM_SYMBOL": f"RELIANCE {strike} CE",
+                "SEM_SMST_SECURITY_ID": 200000 + strike,
+                "SEM_OPTION_TYPE": "CE",
+                "SEM_STRIKE_PRICE": float(strike),
+                "SEM_EXPIRY_DATE": "2026-10-29 15:30:00",
+                "SEM_TRADING_SYMBOL": f"RELIANCE-Oct2026-{strike}-CE",
+            })
+        sm = DhanScripMaster()
+        sm.df = pd.DataFrame(rows)
+
+        # When spot is 3120, ATM should be 3100 (±1 strike -> 3000, 3100, 3200)
+        subs = sm.load_fno_universe(
+            strikes_above_below=1,
+            spot_prices={"RELIANCE": 3120.0},
+        )
+        selected_strikes = sorted([
+            v["strike_price"] for v in sm.security_id_map.values()
+            if not v.get("is_equity") and v["symbol"] == "RELIANCE"
+        ])
+        self.assertEqual(selected_strikes, [3000.0, 3100.0, 3200.0])
+
 
 class TestDhanMarketDataProvider(unittest.TestCase):
     def setUp(self):

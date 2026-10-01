@@ -50,10 +50,14 @@ class MonitorEngine:
         self.detector = ExtremeDetector(thresholds=(60.0, 70.0, 80.0), allow_up=False, allow_down=True)
         self.alert_manager = AlertManager()
         self.notifier = TelegramNotifier()
-        self.dhan_provider = DhanMarketDataProvider(strikes_above_below=6)
+        self.dhan_provider = DhanMarketDataProvider(
+            strikes_above_below=5,
+            index_strikes_above_below=10,
+        )
         self.dummy_provider = DummyMarketDataProvider(
             update_interval_seconds=0,
-            strikes_above_below=4,
+            strikes_above_below=5,
+            index_strikes_above_below=10,
             enable_random_spikes=True,
         )
         self.recent_alerts: list[ExtremeEvent] = []
