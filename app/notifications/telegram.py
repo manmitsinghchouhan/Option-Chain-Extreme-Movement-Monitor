@@ -84,16 +84,7 @@ class TelegramNotifier:
         self._penny_chat_id = penny_chat_id
 
         # Connection-pooled resilient requests session
-        self._session = requests.Session()
-        retry_strategy = Retry(
-            total=3,
-            backoff_factor=1.0,
-            status_forcelist=[500, 502, 503, 504],
-            raise_on_status=False,
-        )
-        adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=10, pool_maxsize=20)
-        self._session.mount("https://", adapter)
-        self._session.mount("http://", adapter)
+        self._session = self._create_session()
 
         self._core_queue: queue.Queue = queue.Queue(maxsize=1000)
         self._index_queue: queue.Queue = queue.Queue(maxsize=1000)
@@ -284,8 +275,23 @@ class TelegramNotifier:
             f"Time: {format_ist_time(event.current_timestamp)} IST"
         )
 
+    def _create_session(self) -> requests.Session:
+        """Build resilient requests session with automatic retries for dropped sockets."""
+        session = requests.Session()
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1.0,
+            status_forcelist=[429, 500, 502, 503, 504],
+            raise_on_status=False,
+            allowed_methods=None,  # Allow retrying all HTTP methods including POST
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=10, pool_maxsize=20)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        return session
+
     def _send_immediate(self, event: ExtremeEvent, channel_type: str = "core") -> bool:
-        """Perform actual HTTP POST to the appropriate Telegram bot and channel."""
+        """Perform actual HTTP POST to the appropriate Telegram bot and channel with auto-recovery."""
         if channel_type == "penny":
             if not self.is_penny_configured():
                 return False
@@ -303,24 +309,10 @@ class TelegramNotifier:
             chat_id = self.chat_id
 
         url = f"https://api.telegram.org/bot{token}/sendMessage"
-        try:
-            response = self._session.post(
-                url,
-                json={
-                    "chat_id": chat_id,
-                    "text": self.format_message(event),
-                },
-                timeout=12,
-            )
-            if response.status_code == 429:
-                retry_after = 5
-                try:
-                    retry_after = int(response.json().get("parameters", {}).get("retry_after", 5))
-                except Exception:
-                    pass
-                logger.warning("Telegram 429 rate limit hit (%s). Pausing for %ds before retry...", channel_type, retry_after)
-                time.sleep(retry_after + 1)
-                retry_res = self._session.post(
+
+        for attempt in range(2):
+            try:
+                response = self._session.post(
                     url,
                     json={
                         "chat_id": chat_id,
@@ -328,13 +320,30 @@ class TelegramNotifier:
                     },
                     timeout=12,
                 )
-                return bool(retry_res.status_code == 200)
+                if response.status_code == 429:
+                    retry_after = 5
+                    try:
+                        retry_after = int(response.json().get("parameters", {}).get("retry_after", 5))
+                    except Exception:
+                        pass
+                    logger.warning("Telegram 429 rate limit hit (%s). Pausing for %ds before retry...", channel_type, retry_after)
+                    time.sleep(retry_after + 1)
+                    continue
 
-            response.raise_for_status()
-            return bool(response.json().get("ok"))
-        except Exception as e:
-            logger.error("Failed to post message to Telegram (%s): %s", channel_type, e)
-            return False
+                response.raise_for_status()
+                return bool(response.json().get("ok"))
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                logger.warning("Telegram connection reset/dropped (%s, attempt %d): %s. Re-establishing socket...", channel_type, attempt + 1, e)
+                try:
+                    self._session.close()
+                except Exception:
+                    pass
+                self._session = self._create_session()
+                time.sleep(1.0)
+            except Exception as e:
+                logger.error("Failed to post message to Telegram (%s): %s", channel_type, e)
+                return False
+        return False
 
     def send(self, event: ExtremeEvent) -> bool:
         """Enqueue event for rate-limited async dispatch to the appropriate bot/channel."""
