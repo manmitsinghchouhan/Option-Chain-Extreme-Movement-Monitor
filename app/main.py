@@ -172,6 +172,7 @@ st.markdown(
         padding: 12px 18px;
         margin-bottom: 12px;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        color: inherit;
     }
     .alert-card-70 {
         background: rgba(245, 158, 11, 0.12);
@@ -181,6 +182,7 @@ st.markdown(
         padding: 12px 18px;
         margin-bottom: 12px;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        color: inherit;
     }
     .alert-card-80 {
         background: rgba(239, 68, 68, 0.12);
@@ -190,6 +192,7 @@ st.markdown(
         padding: 12px 18px;
         margin-bottom: 12px;
         box-shadow: 0 2px 10px rgba(239, 68, 68, 0.1);
+        color: inherit;
     }
     .alert-card-up {
         background: rgba(56, 189, 248, 0.12);
@@ -199,6 +202,7 @@ st.markdown(
         padding: 12px 18px;
         margin-bottom: 12px;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        color: inherit;
     }
     .pinned-card {
         background: rgba(56, 189, 248, 0.08);
@@ -208,39 +212,41 @@ st.markdown(
         padding: 12px 18px;
         margin-bottom: 8px;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        color: inherit;
     }
     .card-title {
         font-size: 1.15rem;
         font-weight: 700;
-        color: var(--text-color, #0f172a);
+        color: inherit;
     }
     .card-threshold {
         margin-left: 8px;
         font-weight: 600;
         font-size: 0.88rem;
-        color: var(--text-color, #475569);
-        opacity: 0.8;
+        color: inherit;
+        opacity: 0.75;
     }
     .card-time {
         font-size: 0.9rem;
-        color: var(--text-color, #475569);
-        opacity: 0.85;
+        color: inherit;
+        opacity: 0.75;
     }
     .card-details {
         margin-top: 8px;
         font-size: 0.95rem;
-        color: var(--text-color, #1e293b);
+        color: inherit;
+        opacity: 0.95;
         line-height: 1.5;
     }
     .mover-badge {
         display: inline-block;
-        background: rgba(125, 125, 125, 0.12);
+        background: rgba(125, 125, 125, 0.15);
         border: 1px solid rgba(125, 125, 125, 0.25);
         border-radius: 6px;
         padding: 4px 10px;
         margin: 3px 6px 3px 0;
         font-size: 0.88rem;
-        color: var(--text-color, #0f172a);
+        color: inherit;
     }
     </style>
     """,
