@@ -165,49 +165,82 @@ st.markdown(
         100% { opacity: 0.7; }
     }
     .alert-card-60 {
-        background: rgba(16, 185, 129, 0.08);
-        border: 1px solid rgba(16, 185, 129, 0.3);
+        background: rgba(16, 185, 129, 0.12);
+        border: 1px solid rgba(16, 185, 129, 0.4);
         border-left: 6px solid #10b981;
         border-radius: 8px;
         padding: 12px 18px;
         margin-bottom: 12px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
     }
     .alert-card-70 {
-        background: rgba(245, 158, 11, 0.09);
-        border: 1px solid rgba(245, 158, 11, 0.35);
+        background: rgba(245, 158, 11, 0.12);
+        border: 1px solid rgba(245, 158, 11, 0.45);
         border-left: 6px solid #f59e0b;
         border-radius: 8px;
         padding: 12px 18px;
         margin-bottom: 12px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
     }
     .alert-card-80 {
         background: rgba(239, 68, 68, 0.12);
-        border: 1px solid rgba(239, 68, 68, 0.4);
+        border: 1px solid rgba(239, 68, 68, 0.45);
         border-left: 6px solid #ef4444;
         border-radius: 8px;
         padding: 12px 18px;
         margin-bottom: 12px;
-        box-shadow: 0 4px 16px rgba(239, 68, 68, 0.15);
+        box-shadow: 0 2px 10px rgba(239, 68, 68, 0.1);
     }
     .alert-card-up {
-        background: rgba(56, 189, 248, 0.08);
-        border: 1px solid rgba(56, 189, 248, 0.3);
+        background: rgba(56, 189, 248, 0.12);
+        border: 1px solid rgba(56, 189, 248, 0.4);
         border-left: 6px solid #38bdf8;
         border-radius: 8px;
         padding: 12px 18px;
         margin-bottom: 12px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+    .pinned-card {
+        background: rgba(56, 189, 248, 0.08);
+        border: 1px solid rgba(56, 189, 248, 0.35);
+        border-left: 6px solid #38bdf8;
+        border-radius: 8px;
+        padding: 12px 18px;
+        margin-bottom: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+    .card-title {
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: var(--text-color, #0f172a);
+    }
+    .card-threshold {
+        margin-left: 8px;
+        font-weight: 600;
+        font-size: 0.88rem;
+        color: var(--text-color, #475569);
+        opacity: 0.8;
+    }
+    .card-time {
+        font-size: 0.9rem;
+        color: var(--text-color, #475569);
+        opacity: 0.85;
+    }
+    .card-details {
+        margin-top: 8px;
+        font-size: 0.95rem;
+        color: var(--text-color, #1e293b);
+        line-height: 1.5;
     }
     .mover-badge {
         display: inline-block;
-        background: rgba(255, 255, 255, 0.07);
-        border: 1px solid rgba(255, 255, 255, 0.15);
+        background: rgba(125, 125, 125, 0.12);
+        border: 1px solid rgba(125, 125, 125, 0.25);
         border-radius: 6px;
         padding: 4px 10px;
         margin: 3px 6px 3px 0;
         font-size: 0.88rem;
+        color: var(--text-color, #0f172a);
     }
     </style>
     """,
@@ -533,19 +566,19 @@ if pinned_list:
             expiry_str = f" | 🏷️ Expiry: <strong>{item.expiry}</strong>" if item.expiry else ""
 
             pinned_card_html = (
-                f'<div style="background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(56, 189, 248, 0.35); border-left: 6px solid #38bdf8; border-radius: 8px; padding: 12px 18px; margin-bottom: 8px;">'
+                f'<div class="pinned-card">'
                 f'<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">'
                 f'<div>'
-                f'<strong style="font-size: 1.15rem; color: #f8fafc;">📌 {item.display_title}</strong>'
+                f'<span class="card-title">📌 {item.display_title}</span>'
                 f'<span style="background: {return_bg}; color: {return_color}; border: 1px solid {return_border}; font-weight: 700; padding: 3px 10px; border-radius: 4px; margin-left: 10px; font-size: 0.9rem;">'
                 f'{return_icon} {live_return_pct:+.2f}% Live Return'
                 f'</span>'
                 f'</div>'
-                f'<div style="font-size: 0.85rem; color: #94a3b8;">'
+                f'<div class="card-time">'
                 f'Pinned at: {format_ist_time(item.pinned_timestamp)}'
                 f'</div>'
                 f'</div>'
-                f'<div style="margin-top: 6px; font-size: 0.95rem; color: #cbd5e1;">'
+                f'<div class="card-details">'
                 f'💰 Pinned Entry: <strong>₹{item.pinned_price:.2f}</strong> ➔ Live Now: <strong style="color: {return_color};">₹{current_live_price:.2f}</strong>'
                 f'{spot_str}'
                 f'{expiry_str}'
@@ -632,17 +665,17 @@ def render_alert_cards(alert_list: list[ExtremeEvent], tab_key: str, empty_msg: 
                 f'<div class="{card_class}">'
                 f'<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">'
                 f'<div>'
-                f'<strong style="font-size: 1.15rem; color: #f8fafc;">{event.display_title}</strong>'
+                f'<span class="card-title">{event.display_title}</span>'
                 f'<span style="background: {badge_color}; color: {badge_text_color}; font-weight: 700; padding: 3px 8px; border-radius: 4px; margin-left: 8px; font-size: 0.85rem;">'
                 f'{event.percentage_change:+.2f}% ({dir_icon})'
                 f'</span>'
-                f'<span style="color: #94a3b8; margin-left: 8px; font-weight: 500;">Threshold: {event.threshold:.0f}%</span>'
+                f'<span class="card-threshold">Threshold: {event.threshold:.0f}%</span>'
                 f'</div>'
-                f'<div style="font-size: 0.9rem; color: #cbd5e1;">'
+                f'<div class="card-time">'
                 f'⏱️ {format_ist_time(event.current_timestamp)} ({event.duration_seconds/60:.1f}m window)'
                 f'</div>'
                 f'</div>'
-                f'<div style="margin-top: 8px; font-size: 0.95rem; color: #cbd5e1;">'
+                f'<div class="card-details">'
                 f'💰 Premium: <strong>₹{event.start_price:.2f}</strong> ➔ <strong>₹{event.current_price:.2f}</strong>'
                 f'{spot_html}'
                 f'{expiry_html}'
