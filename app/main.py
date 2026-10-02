@@ -26,24 +26,38 @@ def format_ist_time(dt: datetime) -> str:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(IST).strftime("%H:%M:%S")
 
+# Standard NSE Trading Holidays (Month, Day) -> Holiday Name
+NSE_HOLIDAYS_FIXED = {
+    (1, 26): "Republic Day",
+    (5, 1): "Maharashtra Day / May Day",
+    (8, 15): "Independence Day",
+    (10, 2): "Mahatma Gandhi Jayanti",
+    (12, 25): "Christmas",
+}
+
 def check_market_session_ist() -> tuple[bool, str]:
     """Check if Indian NSE Stock Exchange is actively open."""
     now_ist = get_ist_now()
     weekday = now_ist.weekday()  # 0=Monday, 4=Friday, 5=Saturday, 6=Sunday
     current_time = now_ist.time()
-    
+    month_day = (now_ist.month, now_ist.day)
+
+    if month_day in NSE_HOLIDAYS_FIXED:
+        holiday_name = NSE_HOLIDAYS_FIXED[month_day]
+        return False, f"Trading Holiday ({holiday_name}) — NSE is Closed"
+
     if weekday >= 5:
         day_name = "Saturday" if weekday == 5 else "Sunday"
         return False, f"Weekend ({day_name}) — NSE is Closed"
-    
+
     open_time = dt_time(9, 15)
     close_time = dt_time(15, 30)
-    
+
     if current_time < open_time:
         return False, f"Pre-Market (Opens at 9:15 AM IST, Current: {now_ist.strftime('%I:%M %p')} IST)"
     elif current_time > close_time:
         return False, f"Post-Market (Closed at 3:30 PM IST, Current: {now_ist.strftime('%I:%M %p')} IST)"
-    
+
     return True, f"Live Trading Session ({now_ist.strftime('%I:%M %p')} IST)"
 
 
