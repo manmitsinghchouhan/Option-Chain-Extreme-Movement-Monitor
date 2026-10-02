@@ -169,165 +169,99 @@ class DhanMarketDataProvider(MarketDataProvider):
 
     def fetch_real_option_chain(self, symbol: str) -> dict | None:
         """
-        Fetch real-world option chain snapshot for any F&O stock directly from DhanHQ REST API.
-        Returns underlying spot, expiry, and strike chain matrix with real market LTP, OI, and volume.
+        Fetch real-world option chain snapshot for any F&O stock or index.
+        Uses cached Scrip Master instrument definitions combined with DhanHQ REST API and live WebSocket ticks.
         """
         try:
-            from dhanhq import DhanContext, dhanhq
+            if self.scrip_master.df is None or not self.scrip_master.symbol_instruments:
+                self.scrip_master.load_fno_universe(
+                    strikes_above_below=self.strikes_above_below,
+                    index_strikes_above_below=self.index_strikes_above_below,
+                )
 
-            sec_id = self.scrip_master.get_equity_security_id(symbol)
-            if not sec_id:
-                logger.warning("Could not find equity Security ID for %s", symbol)
+            instruments = self.scrip_master.symbol_instruments.get(symbol, [])
+            if not instruments:
+                logger.warning("No option instruments found in Scrip Master for %s", symbol)
                 return None
 
-            ctx = DhanContext(client_id=self.client_id, access_token=self.access_token)
-            dhan = dhanhq(ctx)
-
-            if symbol == "SENSEX":
-                underlying_seg = "IDX_I"
-                exch_segment_code = 8
-            elif symbol == "NIFTY":
-                underlying_seg = "IDX_I"
-                exch_segment_code = 2
-            else:
-                underlying_seg = "NSE_EQ"
-                exch_segment_code = 2
-
-            exp_res = dhan.expiry_list(sec_id, underlying_seg)
-            if not exp_res or exp_res.get("status") != "success":
-                # Fallback to secondary segment identifier if primary returns error
-                alt_seg = "BSE_FNO" if symbol == "SENSEX" else "NSE_FNO"
-                exp_res = dhan.expiry_list(sec_id, alt_seg)
-
-            if not exp_res or exp_res.get("status") != "success":
-                err_msg = str(exp_res.get("remarks") or exp_res.get("error") or exp_res.get("message") or "") if exp_res else "No response"
-                logger.warning("Dhan expiry_list failed for %s (SecID %s): %s", symbol, sec_id, exp_res)
-                if "auth" in err_msg.lower() or "token" in err_msg.lower() or "401" in err_msg or "unauthorized" in err_msg.lower():
-                    self.last_error = "🔑 DhanHQ Access Token Expired or Invalid. Please generate a new access token from dhanhq.co and update your .env file."
-                elif err_msg:
-                    self.last_error = f"⚠️ DhanHQ API: {err_msg}"
-                return None
-
-            exp_data = exp_res.get("data", {})
-            if isinstance(exp_data, dict) and "data" in exp_data:
-                expiries = exp_data["data"]
-            elif isinstance(exp_data, list):
-                expiries = exp_data
-            else:
-                return None
-
-            if not expiries:
-                return None
-
-            nearest_expiry = expiries[0]
-            chain_res = dhan.option_chain(sec_id, underlying_seg, nearest_expiry)
-            if not chain_res or chain_res.get("status") != "success":
-                alt_seg = "BSE_FNO" if symbol == "SENSEX" else "NSE_FNO"
-                chain_res = dhan.option_chain(sec_id, alt_seg, nearest_expiry)
-
-            if not chain_res or chain_res.get("status") != "success":
-                err_msg = str(chain_res.get("remarks") or chain_res.get("error") or chain_res.get("message") or "") if chain_res else "No response"
-                logger.warning("Dhan option_chain failed for %s: %s", symbol, chain_res)
-                if "auth" in err_msg.lower() or "token" in err_msg.lower() or "401" in err_msg or "unauthorized" in err_msg.lower():
-                    self.last_error = "🔑 DhanHQ Access Token Expired or Invalid. Please generate a new access token from dhanhq.co and update your .env file."
-                return None
-
-            # Clear last error on successful fetch
-            self.last_error = None
-
-            raw_data = chain_res.get("data", {}).get("data", {})
-            spot_price = float(raw_data.get("last_price", 0.0) or 0.0)
-            raw_oc = raw_data.get("oc", {})
-
-            strikes_data = []
-            for strike_str, strike_info in raw_oc.items():
-                strike_val = float(strike_str)
-                ce_info = strike_info.get("ce", {})
-                pe_info = strike_info.get("pe", {})
-
-                strikes_data.append({
-                    "strike": strike_val,
-                    "ce_sec_id": ce_info.get("security_id"),
-                    "ce_ltp": float(ce_info.get("last_price", 0.0) or 0.0),
-                    "ce_prev_close": float(ce_info.get("previous_close_price", 0.0) or 0.0),
-                    "ce_volume": int(ce_info.get("volume", 0) or 0),
-                    "ce_oi": int(ce_info.get("oi", 0) or 0),
-                    "pe_sec_id": pe_info.get("security_id"),
-                    "pe_ltp": float(pe_info.get("last_price", 0.0) or 0.0),
-                    "pe_prev_close": float(pe_info.get("previous_close_price", 0.0) or 0.0),
-                    "pe_volume": int(pe_info.get("volume", 0) or 0),
-                    "pe_oi": int(pe_info.get("oi", 0) or 0),
-                })
-
-            strikes_data.sort(key=lambda x: x["strike"])
-
-            # Fallback for spot price when market is closed or after-hours
-            if spot_price <= 0:
-                spot_price = float(self._cached_spot.get(symbol, 0.0))
-
-            if spot_price <= 0 and strikes_data:
-                active_strikes = [
-                    s["strike"] for s in strikes_data
-                    if (s["ce_ltp"] > 0 or s["pe_ltp"] > 0 or s["ce_prev_close"] > 0 or s["ce_oi"] > 0 or s["pe_oi"] > 0)
-                ]
-                if active_strikes:
-                    spot_price = active_strikes[len(active_strikes) // 2]
-                else:
-                    spot_price = strikes_data[len(strikes_data) // 2]["strike"]
-
-            # Filter strikes around ATM (closest to spot price)
-            if spot_price > 0 and strikes_data:
-                closest_strike = min(strikes_data, key=lambda x: abs(x["strike"] - spot_price))["strike"]
-                closest_idx = [i for i, x in enumerate(strikes_data) if x["strike"] == closest_strike][0]
-                start_i = max(0, closest_idx - 6)
-                end_i = min(len(strikes_data), closest_idx + 7)
-                strikes_data = strikes_data[start_i:end_i]
-
-            # Dynamically register security IDs and subscribe to live feed if active
-            new_sub_instruments = []
-            for item in strikes_data:
-                strike_val = item["strike"]
-                if item.get("ce_sec_id"):
-                    ce_id = int(item["ce_sec_id"])
-                    self.scrip_master.security_id_map[ce_id] = {
-                        "security_id": ce_id,
-                        "symbol": symbol,
-                        "strike_price": strike_val,
-                        "option_type": OptionType.CE,
-                        "expiry": nearest_expiry,
-                        "trading_symbol": f"{symbol} {strike_val:.0f} CE",
+            nearest_expiry = instruments[0].get("expiry", "")
+            strikes_map: dict[float, dict] = {}
+            for inst in instruments:
+                strike = float(inst["strike_price"])
+                if strike not in strikes_map:
+                    strikes_map[strike] = {
+                        "strike": strike,
+                        "ce_sec_id": None,
+                        "ce_ltp": 0.0,
+                        "ce_prev_close": 0.0,
+                        "ce_volume": 0,
+                        "ce_oi": 0,
+                        "pe_sec_id": None,
+                        "pe_ltp": 0.0,
+                        "pe_prev_close": 0.0,
+                        "pe_volume": 0,
+                        "pe_oi": 0,
                     }
-                    new_sub_instruments.append((exch_segment_code, str(ce_id), 17))
+                if inst["option_type"] == OptionType.CE:
+                    strikes_map[strike]["ce_sec_id"] = inst["security_id"]
+                elif inst["option_type"] == OptionType.PE:
+                    strikes_map[strike]["pe_sec_id"] = inst["security_id"]
 
-                if item.get("pe_sec_id"):
-                    pe_id = int(item["pe_sec_id"])
-                    self.scrip_master.security_id_map[pe_id] = {
-                        "security_id": pe_id,
-                        "symbol": symbol,
-                        "strike_price": strike_val,
-                        "option_type": OptionType.PE,
-                        "expiry": nearest_expiry,
-                        "trading_symbol": f"{symbol} {strike_val:.0f} PE",
-                    }
-                    new_sub_instruments.append((exch_segment_code, str(pe_id), 17))
+            strikes_data = sorted(strikes_map.values(), key=lambda x: x["strike"])
+            spot_price = float(self._cached_spot.get(symbol, 0.0))
 
-            # Also register and dynamically subscribe equity cash security ID for live spot updates
-            eq_sec_id = self.scrip_master.get_equity_security_id(symbol)
-            if eq_sec_id:
-                self.scrip_master.security_id_map[int(eq_sec_id)] = {
-                    "security_id": int(eq_sec_id),
-                    "symbol": symbol,
-                    "is_equity": True,
-                    "trading_symbol": symbol,
-                }
-                new_sub_instruments.append((1, str(eq_sec_id), 17))
-
-            if self._feed and new_sub_instruments:
+            # Optional: Enforce fresh REST data from DhanHQ if client credentials present
+            if self.client_id and self.access_token:
                 try:
-                    self._feed.subscribe_symbols(new_sub_instruments)
-                    logger.info("Dynamically subscribed to %d active contracts for %s", len(new_sub_instruments), symbol)
+                    from dhanhq import DhanContext, dhanhq
+
+                    sec_id = self.scrip_master.get_equity_security_id(symbol)
+                    if sec_id:
+                        ctx = DhanContext(client_id=self.client_id, access_token=self.access_token)
+                        dhan = dhanhq(ctx)
+
+                        underlying_seg = "IDX_I" if symbol in ("NIFTY", "SENSEX") else "NSE_EQ"
+                        exp_res = dhan.expiry_list(sec_id, underlying_seg)
+                        if not exp_res or exp_res.get("status") != "success":
+                            alt_seg = "BSE_FNO" if symbol == "SENSEX" else "NSE_FNO"
+                            exp_res = dhan.expiry_list(sec_id, alt_seg)
+
+                        if exp_res and exp_res.get("status") == "success":
+                            exp_data = exp_res.get("data", {})
+                            expiries = exp_data.get("data", []) if isinstance(exp_data, dict) else (exp_data if isinstance(exp_data, list) else [])
+                            if expiries:
+                                chain_res = dhan.option_chain(sec_id, underlying_seg, expiries[0])
+                                if not chain_res or chain_res.get("status") != "success":
+                                    alt_seg = "BSE_FNO" if symbol == "SENSEX" else "NSE_FNO"
+                                    chain_res = dhan.option_chain(sec_id, alt_seg, expiries[0])
+
+                                if chain_res and chain_res.get("status") == "success":
+                                    raw_data = chain_res.get("data", {}).get("data", {})
+                                    spot_val = float(raw_data.get("last_price", 0.0) or 0.0)
+                                    if spot_val > 0:
+                                        spot_price = spot_val
+                                    raw_oc = raw_data.get("oc", {})
+                                    for s_item in strikes_data:
+                                        s_k = str(int(s_item["strike"])) if s_item["strike"].is_integer() else str(s_item["strike"])
+                                        s_entry = raw_oc.get(s_k) or raw_oc.get(f"{s_item['strike']:.2f}") or raw_oc.get(f"{s_item['strike']:.1f}")
+                                        if s_entry:
+                                            ce_info = s_entry.get("ce", {})
+                                            pe_info = s_entry.get("pe", {})
+                                            if ce_info:
+                                                s_item["ce_ltp"] = float(ce_info.get("last_price", 0.0) or 0.0)
+                                                s_item["ce_prev_close"] = float(ce_info.get("previous_close_price", 0.0) or 0.0)
+                                                s_item["ce_volume"] = int(ce_info.get("volume", 0) or 0)
+                                                s_item["ce_oi"] = int(ce_info.get("oi", 0) or 0)
+                                            if pe_info:
+                                                s_item["pe_ltp"] = float(pe_info.get("last_price", 0.0) or 0.0)
+                                                s_item["pe_prev_close"] = float(pe_info.get("previous_close_price", 0.0) or 0.0)
+                                                s_item["pe_volume"] = int(pe_info.get("volume", 0) or 0)
+                                                s_item["pe_oi"] = int(pe_info.get("oi", 0) or 0)
                 except Exception as e:
-                    logger.debug("Could not dynamically subscribe symbols: %s", e)
+                    logger.debug("REST option chain query skipped: %s", e)
+
+            # Clear error on successful structure building
+            self.last_error = None
 
             return {
                 "symbol": symbol,
@@ -337,8 +271,7 @@ class DhanMarketDataProvider(MarketDataProvider):
             }
 
         except Exception as e:
-            logger.error("Error fetching real option chain for %s: %s", symbol, e)
-            self.last_error = "🔑 DhanHQ Access Token Expired or Invalid. Please generate a new access token from dhanhq.co and update your .env file."
+            logger.error("Error generating option chain for %s: %s", symbol, e)
             return None
 
     def start_background_feed(self, on_tick_callback) -> None:
