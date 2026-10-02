@@ -183,14 +183,29 @@ class DhanMarketDataProvider(MarketDataProvider):
             ctx = DhanContext(client_id=self.client_id, access_token=self.access_token)
             dhan = dhanhq(ctx)
 
-            exch_segment = "BSE_FNO" if symbol == "SENSEX" else "NSE_FNO"
-            exch_segment_code = 8 if symbol == "SENSEX" else 2
+            if symbol == "SENSEX":
+                underlying_seg = "IDX_I"
+                exch_segment_code = 8
+            elif symbol == "NIFTY":
+                underlying_seg = "IDX_I"
+                exch_segment_code = 2
+            else:
+                underlying_seg = "NSE_EQ"
+                exch_segment_code = 2
 
-            exp_res = dhan.expiry_list(sec_id, exch_segment)
+            exp_res = dhan.expiry_list(sec_id, underlying_seg)
             if not exp_res or exp_res.get("status") != "success":
-                err_msg = str(exp_res.get("remarks") or exp_res.get("error") or "") if exp_res else "No response"
-                if "auth" in err_msg.lower() or "token" in err_msg.lower() or not exp_res:
+                # Fallback to secondary segment identifier if primary returns error
+                alt_seg = "BSE_FNO" if symbol == "SENSEX" else "NSE_FNO"
+                exp_res = dhan.expiry_list(sec_id, alt_seg)
+
+            if not exp_res or exp_res.get("status") != "success":
+                err_msg = str(exp_res.get("remarks") or exp_res.get("error") or exp_res.get("message") or "") if exp_res else "No response"
+                logger.warning("Dhan expiry_list failed for %s (SecID %s): %s", symbol, sec_id, exp_res)
+                if "auth" in err_msg.lower() or "token" in err_msg.lower() or "401" in err_msg or "unauthorized" in err_msg.lower():
                     self.last_error = "🔑 DhanHQ Access Token Expired or Invalid. Please generate a new access token from dhanhq.co and update your .env file."
+                elif err_msg:
+                    self.last_error = f"⚠️ DhanHQ API: {err_msg}"
                 return None
 
             exp_data = exp_res.get("data", {})
@@ -205,8 +220,16 @@ class DhanMarketDataProvider(MarketDataProvider):
                 return None
 
             nearest_expiry = expiries[0]
-            chain_res = dhan.option_chain(sec_id, exch_segment, nearest_expiry)
+            chain_res = dhan.option_chain(sec_id, underlying_seg, nearest_expiry)
             if not chain_res or chain_res.get("status") != "success":
+                alt_seg = "BSE_FNO" if symbol == "SENSEX" else "NSE_FNO"
+                chain_res = dhan.option_chain(sec_id, alt_seg, nearest_expiry)
+
+            if not chain_res or chain_res.get("status") != "success":
+                err_msg = str(chain_res.get("remarks") or chain_res.get("error") or chain_res.get("message") or "") if chain_res else "No response"
+                logger.warning("Dhan option_chain failed for %s: %s", symbol, chain_res)
+                if "auth" in err_msg.lower() or "token" in err_msg.lower() or "401" in err_msg or "unauthorized" in err_msg.lower():
+                    self.last_error = "🔑 DhanHQ Access Token Expired or Invalid. Please generate a new access token from dhanhq.co and update your .env file."
                 return None
 
             # Clear last error on successful fetch

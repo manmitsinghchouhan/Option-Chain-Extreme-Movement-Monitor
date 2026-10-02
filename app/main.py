@@ -263,6 +263,17 @@ alert_manager = engine.alert_manager
 notifier = engine.notifier
 all_symbols = get_symbols()
 
+# Synchronize engine credentials with latest os.environ / secrets on every script run
+current_cid = os.getenv("DHAN_CLIENT_ID", "")
+current_tok = os.getenv("DHAN_ACCESS_TOKEN", "")
+if engine.dhan_provider and current_tok:
+    if engine.dhan_provider.access_token != current_tok:
+        engine.update_dhan_credentials(current_cid, current_tok)
+    elif engine.dhan_provider.last_error and "missing" in str(engine.dhan_provider.last_error).lower():
+        engine.dhan_provider.access_token = current_tok
+        engine.dhan_provider.client_id = current_cid
+        engine.dhan_provider.last_error = None
+
 # -------------------------------------------------------------------
 # Sidebar Configuration
 # -------------------------------------------------------------------
@@ -270,8 +281,8 @@ all_symbols = get_symbols()
 st.sidebar.title("⚙️ System Settings")
 
 provider_options = [
-    "🟢 DhanHQ Live WebSocket (210 F&O Stocks)",
-    "🔘 Simulation Mode (3,780 Dummy Option Contracts)",
+    f"🟢 DhanHQ Live WebSocket ({len(all_symbols)} Instruments)",
+    "🔘 Simulation Mode (4,770 Dummy Option Contracts)",
 ]
 
 selected_provider_mode = st.sidebar.selectbox(
