@@ -106,8 +106,8 @@ def reload_all_secrets_and_reconnect() -> None:
         st.session_state.pop("custom_dhan_access_token", None)
         st.session_state.pop("custom_dhan_client_id", None)
     sync_secrets_to_env()
-    client_id = os.getenv("DHAN_CLIENT_ID", "")
-    access_token = os.getenv("DHAN_ACCESS_TOKEN", "")
+    client_id = str(os.getenv("DHAN_CLIENT_ID", "")).strip().strip('"').strip("'")
+    access_token = str(os.getenv("DHAN_ACCESS_TOKEN", "")).strip().strip('"').strip("'")
     if access_token and hasattr(engine, "update_dhan_credentials"):
         engine.update_dhan_credentials(client_id, access_token)
     elif engine.dhan_provider:
@@ -317,8 +317,8 @@ if is_dhan_mode:
             new_cid_input = st.text_input("Dhan Client ID", type="password", key="daily_client_id_input", help="Enter Dhan Client ID (only needed once)")
         
         if st.button("Apply & Connect", width='stretch', key="apply_daily_token"):
-            tok = new_token_input.strip()
-            cid = new_cid_input.strip() if cid_needed else os.getenv("DHAN_CLIENT_ID", "")
+            tok = new_token_input.strip().strip('"').strip("'")
+            cid = (new_cid_input.strip() if cid_needed else os.getenv("DHAN_CLIENT_ID", "")).strip().strip('"').strip("'")
             if tok:
                 if hasattr(st, "session_state"):
                     st.session_state["custom_dhan_access_token"] = tok

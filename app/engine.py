@@ -166,17 +166,21 @@ class MonitorEngine:
     def update_dhan_credentials(self, client_id: str, access_token: str) -> None:
         """Update credentials dynamically and reconnect if active."""
         with self.lock:
-            if client_id:
-                os.environ["DHAN_CLIENT_ID"] = client_id
-                self.dhan_provider.client_id = client_id
-            if access_token:
-                os.environ["DHAN_ACCESS_TOKEN"] = access_token
-                self.dhan_provider.access_token = access_token
+            if client_id is not None:
+                cid = str(client_id).strip().strip('"').strip("'")
+                if cid:
+                    os.environ["DHAN_CLIENT_ID"] = cid
+                    self.dhan_provider.client_id = cid
+            if access_token is not None:
+                tok = str(access_token).strip().strip('"').strip("'")
+                if tok:
+                    os.environ["DHAN_ACCESS_TOKEN"] = tok
+                    self.dhan_provider.access_token = tok
 
             self.dhan_provider.last_error = None
             if self.dhan_provider._running:
                 self.dhan_provider.stop()
-            
+
             # If streaming is enabled, immediately launch the new feed with fresh token!
             if self.is_streaming_active:
                 self.dhan_provider.start_background_feed(on_tick_callback=self.process_tick)

@@ -33,8 +33,10 @@ class DhanMarketDataProvider(MarketDataProvider):
         strikes_above_below: int = 5,
         index_strikes_above_below: int = 10,
     ) -> None:
-        self.client_id = client_id or os.getenv("DHAN_CLIENT_ID", "")
-        self.access_token = access_token or os.getenv("DHAN_ACCESS_TOKEN", "")
+        raw_cid = client_id or os.getenv("DHAN_CLIENT_ID", "")
+        raw_tok = access_token or os.getenv("DHAN_ACCESS_TOKEN", "")
+        self.client_id = str(raw_cid).strip().strip('"').strip("'")
+        self.access_token = str(raw_tok).strip().strip('"').strip("'")
 
         self.strikes_above_below = strikes_above_below
         self.index_strikes_above_below = index_strikes_above_below
@@ -274,6 +276,37 @@ class DhanMarketDataProvider(MarketDataProvider):
             logger.error("Error generating option chain for %s: %s", symbol, e)
             return None
 
+    def verify_credentials(self) -> tuple[bool, str]:
+        """Validate DhanHQ credentials via lightweight REST call."""
+        if not self.client_id or not self.access_token:
+            err = "🔑 DhanHQ credentials missing. Please set DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN in Secrets or sidebar."
+            self.last_error = err
+            return False, err
+        try:
+            from dhanhq import DhanContext, dhanhq
+            ctx = DhanContext(client_id=self.client_id, access_token=self.access_token)
+            dhan = dhanhq(ctx)
+            res = dhan.get_fund_limits()
+            if isinstance(res, dict):
+                status = str(res.get("status", "")).lower()
+                if status == "success":
+                    self.last_error = None
+                    return True, "Authenticated"
+                remarks = res.get("remarks") or {}
+                msg = remarks.get("error_message") or remarks.get("message") or res.get("message") or ""
+                if any(k in str(msg).lower() for k in ("token", "auth", "unauthor", "invalid")):
+                    err = "🔑 DhanHQ Access Token Expired or Invalid. Please generate a new access token from dhanhq.co and update your .env file or Secrets."
+                    self.last_error = err
+                    return False, err
+            return True, "Connected"
+        except Exception as e:
+            err_str = str(e).lower()
+            if any(k in err_str for k in ("401", "403", "unauthor", "token")):
+                err = "🔑 DhanHQ Access Token Expired or Invalid. Please generate a new access token from dhanhq.co and update your .env file or Secrets."
+                self.last_error = err
+                return False, err
+            return True, f"Status check skipped: {e}"
+
     def start_background_feed(self, on_tick_callback) -> None:
         """Start DhanHQ MarketFeed in a dedicated background thread with real-time callback."""
         if self._running:
@@ -348,6 +381,18 @@ class DhanMarketDataProvider(MarketDataProvider):
             except Exception as e:
                 logger.error("Error in background feed packet handler: %s", e)
 
+        def _on_close(instance):
+            logger.info("DhanHQ WebSocket connection closed.")
+
+        def _on_error(instance, error):
+            err_str = str(error).lower()
+            err_type = type(error).__name__.lower()
+            logger.warning("DhanHQ WebSocket error callback: %s (%s)", error, err_type)
+            if any(k in err_str for k in ("401", "403", "unauthorized", "token is expired", "invalid client id", "authentication failed")):
+                self.last_error = "🔑 DhanHQ Access Token Expired or Invalid. Please generate a new access token from dhanhq.co and update your .env file or Secrets."
+            elif "805" in err_str or "active websocket connections exceeded" in err_str:
+                self.last_error = "⚠️ DhanHQ active connection limit exceeded (Only 1 WebSocket allowed per account). Please close duplicate browser tabs or apps."
+
         def _run_feed_safely():
             try:
                 logger.info("Initializing Dhan Scrip Master for background live feed...")
@@ -363,18 +408,27 @@ class DhanMarketDataProvider(MarketDataProvider):
                     instruments=instruments,
                     version="v2",
                     on_message=_packet_handler,
+                    on_close=_on_close,
+                    on_error=_on_error,
                 )
                 logger.info("DhanHQ WebSocket connecting...")
                 self._feed.run()
             except Exception as e:
+                if not self._running:
+                    return
                 err_str = str(e).lower()
-                if "connectionclosed" in type(e).__name__.lower() or "close frame" in err_str or "unauthorized" in err_str:
-                    msg = "🔑 DhanHQ Access Token Expired or Invalid. Please generate a new access token from dhanhq.co and update your .env file."
+                err_type = type(e).__name__.lower()
+                logger.warning("DhanHQ WebSocket exception: %s (%s)", e, err_type)
+
+                if any(k in err_str for k in ("401", "403", "unauthorized", "807", "token is expired", "invalid client id", "authentication failed")):
+                    msg = "🔑 DhanHQ Access Token Expired or Invalid. Please generate a new access token from dhanhq.co and update your .env file or Secrets."
                     logger.warning(msg)
                     self.last_error = msg
+                elif "805" in err_str or "active websocket connections exceeded" in err_str:
+                    self.last_error = "⚠️ DhanHQ active connection limit exceeded (Only 1 WebSocket allowed per account). Please close duplicate browser tabs or apps."
                 else:
-                    logger.warning("DhanHQ WebSocket disconnected: %s", e)
-                    self.last_error = f"⚠️ DhanHQ WebSocket disconnected: {e}"
+                    logger.info("DhanHQ WebSocket disconnected: %s", e)
+            finally:
                 self._running = False
 
         thread = threading.Thread(target=_run_feed_safely, daemon=True)
