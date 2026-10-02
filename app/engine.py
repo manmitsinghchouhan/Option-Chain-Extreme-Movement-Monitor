@@ -235,6 +235,7 @@ class MonitorEngine:
                 threshold=event.threshold,
                 percentage_change=event.percentage_change,
                 underlying_price=event.underlying_price,
+                start_price=event.start_price,
             )
             self.pinned_trades[key] = pinned
             self._save_pinned_trades()

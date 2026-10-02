@@ -567,6 +567,42 @@ if pinned_list:
             return_bg = "rgba(148, 163, 184, 0.15)"
             return_border = "#64748b"
 
+        # Determine trigger severity badge colors for the pinned alert
+        if item.threshold >= 80.0:
+            badge_color = "#ef4444"
+            badge_text_color = "#ffffff"
+            dir_icon = "🔴 -80% CRITICAL"
+        elif item.threshold >= 70.0:
+            badge_color = "#f59e0b"
+            badge_text_color = "#0f172a"
+            dir_icon = "🟡 -70% HIGH"
+        elif item.threshold >= 60.0:
+            badge_color = "#10b981"
+            badge_text_color = "#0f172a"
+            dir_icon = "🟢 -60% TRIGGER"
+        else:
+            badge_color = "#38bdf8"
+            badge_text_color = "#0f172a"
+            dir_icon = f"🎯 {item.percentage_change:+.1f}%"
+
+        threshold_html = (
+            f'<span class="card-threshold">Threshold: {item.threshold:.0f}%</span>'
+            if item.threshold > 0
+            else ""
+        )
+        drop_badge_html = (
+            f'<span style="background: {badge_color}; color: {badge_text_color}; font-weight: 700; padding: 3px 8px; border-radius: 4px; margin-left: 8px; font-size: 0.85rem;">'
+            f'{item.percentage_change:+.2f}% ({dir_icon})'
+            f'</span>'
+            if item.percentage_change != 0
+            else ""
+        )
+        alert_drop_html = (
+            f"💰 Premium: <strong>₹{item.start_price:.2f}</strong> ➔ <strong>₹{item.pinned_price:.2f}</strong> | "
+            if item.start_price > 0
+            else ""
+        )
+
         p_card_col, p_action_col = st.columns([5.2, 0.9])
         with p_card_col:
             underlying_spot = state_manager.get_underlying_price(item.symbol) or item.underlying_price
@@ -578,7 +614,9 @@ if pinned_list:
                 f'<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">'
                 f'<div>'
                 f'<span class="card-title">📌 {item.display_title}</span>'
-                f'<span style="background: {return_bg}; color: {return_color}; border: 1px solid {return_border}; font-weight: 700; padding: 3px 10px; border-radius: 4px; margin-left: 10px; font-size: 0.9rem;">'
+                f'{drop_badge_html}'
+                f'{threshold_html}'
+                f'<span style="background: {return_bg}; color: {return_color}; border: 1px solid {return_border}; font-weight: 700; padding: 3px 10px; border-radius: 4px; margin-left: 8px; font-size: 0.9rem;">'
                 f'{return_icon} {live_return_pct:+.2f}% Live Return'
                 f'</span>'
                 f'</div>'
@@ -587,7 +625,8 @@ if pinned_list:
                 f'</div>'
                 f'</div>'
                 f'<div class="card-details">'
-                f'💰 Pinned Entry: <strong>₹{item.pinned_price:.2f}</strong> ➔ Live Now: <strong style="color: {return_color};">₹{current_live_price:.2f}</strong>'
+                f'{alert_drop_html}'
+                f'📌 Pinned Entry: <strong>₹{item.pinned_price:.2f}</strong> ➔ Live Now: <strong style="color: {return_color};">₹{current_live_price:.2f}</strong>'
                 f'{spot_str}'
                 f'{expiry_str}'
                 f'</div>'

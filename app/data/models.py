@@ -62,6 +62,7 @@ class PinnedTrade:
     threshold: float = 0.0
     percentage_change: float = 0.0  # Alert percentage change at time of pinning
     underlying_price: float = 0.0
+    start_price: float = 0.0  # Alert start price before the extreme drop
 
     @property
     def display_title(self) -> str:
@@ -83,6 +84,7 @@ class PinnedTrade:
             "threshold": self.threshold,
             "percentage_change": self.percentage_change,
             "underlying_price": self.underlying_price,
+            "start_price": self.start_price,
         }
 
     @classmethod
@@ -101,5 +103,6 @@ class PinnedTrade:
             threshold=float(data.get("threshold", 0.0)),
             percentage_change=float(data.get("percentage_change", 0.0)),
             underlying_price=float(data.get("underlying_price", 0.0)),
+            start_price=float(data.get("start_price", 0.0)),
         )
 

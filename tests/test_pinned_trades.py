@@ -16,16 +16,23 @@ def test_pinned_trade_serialization():
         threshold=80.0,
         percentage_change=-80.0,
         underlying_price=2880.0,
+        start_price=50.0,
     )
     data = trade.to_dict()
     assert data["symbol"] == "RELIANCE"
     assert data["pinned_price"] == 10.0
     assert data["option_type"] == "CE"
+    assert data["start_price"] == 50.0
+    assert data["threshold"] == 80.0
+    assert data["percentage_change"] == -80.0
     restored = PinnedTrade.from_dict(data)
     assert restored.symbol == "RELIANCE"
     assert restored.strike_price == 2900.0
     assert restored.option_type == OptionType.CE
     assert restored.display_title == "RELIANCE 2900 CE"
+    assert restored.start_price == 50.0
+    assert restored.threshold == 80.0
+    assert restored.percentage_change == -80.0
 
 
 def test_engine_pin_unpin_and_persistence():
@@ -50,6 +57,9 @@ def test_engine_pin_unpin_and_persistence():
     )
     pinned = engine.pin_trade(event)
     assert pinned.pinned_price == 6.0
+    assert pinned.start_price == 20.0
+    assert pinned.threshold == 70.0
+    assert pinned.percentage_change == -70.0
     assert len(engine.pinned_trades_list) == 1
     assert engine.pinned_trades_list[0].symbol == "INFY"
     assert PINNED_FILE_PATH.exists()
