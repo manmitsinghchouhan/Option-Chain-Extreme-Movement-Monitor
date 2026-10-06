@@ -888,9 +888,13 @@ if is_dhan_mode and engine.dhan_provider:
             ce_live = state_manager.get_latest(ce_key)
             pe_live = state_manager.get_latest(pe_key)
 
-            ce_ltp = ce_live.price if ce_live else item["ce_ltp"]
-            ce_vol = ce_live.volume if (ce_live and ce_live.volume > 0) else item["ce_volume"]
-            ce_oi = ce_live.open_interest if (ce_live and ce_live.open_interest > 0) else item["ce_oi"]
+            ce_ltp = ce_live.price if ce_live else item.get("ce_ltp", 0.0)
+            ce_vol = ce_live.volume if (ce_live and ce_live.volume > 0) else item.get("ce_volume", 0)
+            ce_oi = ce_live.open_interest if (ce_live and ce_live.open_interest > 0) else item.get("ce_oi", 0)
+
+            pe_ltp = pe_live.price if pe_live else item.get("pe_ltp", 0.0)
+            pe_vol = pe_live.volume if (pe_live and pe_live.volume > 0) else item.get("pe_volume", 0)
+            pe_oi = pe_live.open_interest if (pe_live and pe_live.open_interest > 0) else item.get("pe_oi", 0)
 
             sec_ce_id = item.get("ce_sec_id")
             sec_pe_id = item.get("pe_sec_id")
