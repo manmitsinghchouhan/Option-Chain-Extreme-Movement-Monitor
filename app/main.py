@@ -878,6 +878,8 @@ if is_dhan_mode and engine.dhan_provider:
             f"**Live Ticks Ingested:** `{engine.live_ticks_received:,}`"
         )
 
+        cached_prev = getattr(engine.dhan_provider, "_cached_prev_close", {}) if engine.dhan_provider else {}
+
         for item in cached_chain["strikes"]:
             strike = item["strike"]
             ce_key = f"{selected_stock}_{expiry_date}_{strike:.0f}_CE"
@@ -889,20 +891,30 @@ if is_dhan_mode and engine.dhan_provider:
             ce_ltp = ce_live.price if ce_live else item["ce_ltp"]
             ce_vol = ce_live.volume if (ce_live and ce_live.volume > 0) else item["ce_volume"]
             ce_oi = ce_live.open_interest if (ce_live and ce_live.open_interest > 0) else item["ce_oi"]
-            ce_prev = item["ce_prev_close"]
 
-            pe_ltp = pe_live.price if pe_live else item["pe_ltp"]
-            pe_vol = pe_live.volume if (pe_live and pe_live.volume > 0) else item["pe_volume"]
-            pe_oi = pe_live.open_interest if (pe_live and pe_live.open_interest > 0) else item["pe_oi"]
-            pe_prev = item["pe_prev_close"]
-
-            ce_chg = f"{((ce_ltp - ce_prev) / ce_prev) * 100:+.1f}%" if ce_prev > 0 and ce_ltp > 0 else "0.0%"
-            pe_chg = f"{((pe_ltp - pe_prev) / pe_prev) * 100:+.1f}%" if pe_prev > 0 and pe_ltp > 0 else "0.0%"
+            sec_ce_id = item.get("ce_sec_id")
+            sec_pe_id = item.get("pe_sec_id")
+            ce_prev = cached_prev.get(sec_ce_id) or item.get("ce_prev_close", 0.0) or 0.0
+            pe_prev = cached_prev.get(sec_pe_id) or item.get("pe_prev_close", 0.0) or 0.0
 
             ce_hist = state_manager.get_history(ce_key)
             pe_hist = state_manager.get_history(pe_key)
             ce_icon = "🟢 " if len(ce_hist) >= 2 else ""
             pe_icon = "🟢 " if len(pe_hist) >= 2 else ""
+
+            if ce_prev > 0 and ce_ltp > 0:
+                ce_chg = f"{((ce_ltp - ce_prev) / ce_prev) * 100:+.1f}%"
+            elif len(ce_hist) >= 2 and ce_hist[0].price > 0 and ce_ltp > 0:
+                ce_chg = f"{((ce_ltp - ce_hist[0].price) / ce_hist[0].price) * 100:+.1f}%"
+            else:
+                ce_chg = "0.0%"
+
+            if pe_prev > 0 and pe_ltp > 0:
+                pe_chg = f"{((pe_ltp - pe_prev) / pe_prev) * 100:+.1f}%"
+            elif len(pe_hist) >= 2 and pe_hist[0].price > 0 and pe_ltp > 0:
+                pe_chg = f"{((pe_ltp - pe_hist[0].price) / pe_hist[0].price) * 100:+.1f}%"
+            else:
+                pe_chg = "0.0%"
 
             chain_rows.append({
                 "CE OI": f"{ce_oi:,}",

@@ -48,6 +48,7 @@ class DhanMarketDataProvider(MarketDataProvider):
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._cached_oi: dict[int, int] = {}
         self._cached_spot: dict[str, float] = {}
+        self._cached_prev_close: dict[int, float] = {}
         self.last_error: Optional[str] = None
 
         if not self.client_id or not self.access_token:
@@ -78,8 +79,24 @@ class DhanMarketDataProvider(MarketDataProvider):
                     pass
                 return
 
+            # Store Previous Close updates
+            if p_type == "Previous Close":
+                p_close = packet.get("prev_close")
+                if p_close is not None:
+                    try:
+                        self._cached_prev_close[sec_id] = float(p_close)
+                    except (ValueError, TypeError):
+                        pass
+                return
+
             # Handle Quote Data, Full Data, and Ticker Data
             if p_type in ("Quote Data", "Full Data", "Ticker Data"):
+                p_close_raw = packet.get("close") or packet.get("prev_close")
+                if p_close_raw is not None:
+                    try:
+                        self._cached_prev_close[sec_id] = float(p_close_raw)
+                    except (ValueError, TypeError):
+                        pass
                 meta = self.scrip_master.security_id_map.get(sec_id)
                 if not meta:
                     return
@@ -336,7 +353,22 @@ class DhanMarketDataProvider(MarketDataProvider):
                         pass
                     return
 
+                if p_type == "Previous Close":
+                    p_close = packet.get("prev_close")
+                    if p_close is not None:
+                        try:
+                            self._cached_prev_close[sec_id] = float(p_close)
+                        except (ValueError, TypeError):
+                            pass
+                    return
+
                 if p_type in ("Quote Data", "Full Data", "Ticker Data"):
+                    p_close_raw = packet.get("close") or packet.get("prev_close")
+                    if p_close_raw is not None:
+                        try:
+                            self._cached_prev_close[sec_id] = float(p_close_raw)
+                        except (ValueError, TypeError):
+                            pass
                     meta = self.scrip_master.security_id_map.get(sec_id)
                     if not meta:
                         return
