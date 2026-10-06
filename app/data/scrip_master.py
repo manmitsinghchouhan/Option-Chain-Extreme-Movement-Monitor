@@ -26,12 +26,16 @@ class DhanScripMaster:
 
     def fetch_master(self, force_refresh: bool = False) -> pd.DataFrame:
         """Download or load cached daily scrip master CSV."""
-        # Use cache if less than 12 hours old
-        if not force_refresh and self.cache_path.exists():
-            mtime = datetime.fromtimestamp(self.cache_path.stat().st_mtime)
-            if (datetime.now() - mtime).total_seconds() < 12 * 3600:
-                self.df = pd.read_csv(self.cache_path, low_memory=False)
-                return self.df
+        # Use cache if less than 12 hours old and non-empty
+        if not force_refresh and self.cache_path.exists() and self.cache_path.stat().st_size > 1000:
+            try:
+                mtime = datetime.fromtimestamp(self.cache_path.stat().st_mtime)
+                if (datetime.now() - mtime).total_seconds() < 12 * 3600:
+                    self.df = pd.read_csv(self.cache_path, low_memory=False)
+                    if not self.df.empty and "SEM_SMST_SECURITY_ID" in self.df.columns:
+                        return self.df
+            except Exception as e:
+                logger.warning("Failed to load cached scrip master: %s. Redownloading...", e)
 
         response = requests.get(SCRIP_MASTER_URL, timeout=45)
         response.raise_for_status()
@@ -42,7 +46,11 @@ class DhanScripMaster:
         )
 
         # Save to local cache
-        self.df.to_csv(self.cache_path, index=False)
+        try:
+            self.df.to_csv(self.cache_path, index=False)
+        except Exception as e:
+            logger.warning("Failed to cache scrip master: %s", e)
+
         return self.df
 
     def load_fno_universe(
