@@ -9,10 +9,26 @@ from typing import Optional
 IST = timezone(timedelta(hours=5, minutes=30))
 
 from dotenv import load_dotenv
+import functools
+import websockets
 
 from app.data.base import MarketDataProvider
 from app.data.models import MarketTick, OptionTick, OptionType
 from app.data.scrip_master import DhanScripMaster
+
+# Optimize websockets.connect for high-throughput market data streams (disable client-side keepalive ping timeout)
+_original_ws_connect = websockets.connect
+
+@functools.wraps(_original_ws_connect)
+def _dhan_ws_connect(uri, *args, **kwargs):
+    if "api-feed.dhan.co" in str(uri):
+        kwargs.setdefault("ping_interval", None)
+        kwargs.setdefault("ping_timeout", None)
+        kwargs.setdefault("max_size", None)
+        kwargs.setdefault("max_queue", 128)
+    return _original_ws_connect(uri, *args, **kwargs)
+
+websockets.connect = _dhan_ws_connect
 
 # Load environment variables
 load_dotenv()
@@ -419,6 +435,10 @@ class DhanMarketDataProvider(MarketDataProvider):
         def _on_error(instance, error):
             err_str = str(error).lower()
             err_type = type(error).__name__.lower()
+            if "ping timeout" in err_str or "keepalive" in err_str or "no close frame" in err_str:
+                logger.debug("DhanHQ WebSocket keepalive reset: %s", error)
+                return
+
             logger.warning("DhanHQ WebSocket error callback: %s (%s)", error, err_type)
             if any(k in err_str for k in ("401", "403", "unauthorized", "token is expired", "invalid client id", "authentication failed")):
                 self.last_error = "🔑 DhanHQ Access Token Expired or Invalid. Please generate a new access token from dhanhq.co and update your .env file or Secrets."
