@@ -270,7 +270,13 @@ st.markdown(
 )
 
 
-engine = MonitorEngine.get_instance()
+@st.cache_resource
+def get_shared_engine() -> MonitorEngine:
+    """Streamlit cached resource ensuring all browser reruns share the single live engine."""
+    return MonitorEngine.get_instance()
+
+
+engine = get_shared_engine()
 state_manager = engine.state_manager
 detector = engine.detector
 alert_manager = engine.alert_manager
@@ -868,9 +874,15 @@ if is_dhan_mode and engine.dhan_provider:
     cached_chain = engine.cached_real_chains.get(selected_stock)
 
     if cached_chain and cached_chain.get("strikes"):
-        spot_price = state_manager.get_underlying_price(selected_stock) or cached_chain["spot_price"]
+        live_spot = (
+            (engine.dhan_provider._cached_spot.get(selected_stock) if engine.dhan_provider else None)
+            or state_manager.get_underlying_price(selected_stock)
+            or cached_chain["spot_price"]
+        )
+        spot_price = float(live_spot or 0.0)
         spot_hist = state_manager.get_history(selected_stock)
-        spot_icon = "🟢 " if len(spot_hist) >= 2 else ""
+        spot_has_ticks = len(spot_hist) >= 2 or bool(engine.dhan_provider and engine.dhan_provider._cached_spot.get(selected_stock))
+        spot_icon = "🟢 " if spot_has_ticks else ""
         expiry_date = cached_chain["expiry"]
         st.markdown(
             f"**Underlying Spot:** `{selected_stock}` @ **{spot_icon}₹{spot_price:.2f}** | "

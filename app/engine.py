@@ -37,12 +37,51 @@ class MonitorEngine:
 
     @classmethod
     def get_instance(cls) -> "MonitorEngine":
-        """Get or create the global singleton engine instance safely without inspect.getsource."""
-        if cls._instance is None:
-            with cls._singleton_lock:
-                if cls._instance is None:
-                    cls._instance = cls()
-        return cls._instance
+        """Get or create the server-wide shared singleton engine instance."""
+        import gc
+        import sys
+
+        # 1. Check indestructible sys global anchor
+        existing = getattr(sys, "_monitor_engine_singleton", None)
+        if existing is not None and isinstance(existing, cls):
+            cls._instance = existing
+            return existing
+
+        with cls._singleton_lock:
+            existing = getattr(sys, "_monitor_engine_singleton", None)
+            if existing is not None and isinstance(existing, cls):
+                cls._instance = existing
+                return existing
+
+            if cls._instance is not None:
+                sys._monitor_engine_singleton = cls._instance
+                return cls._instance
+
+            # 2. Reconnect to any active running MonitorEngine in this process (preferring the one with active feed or alerts)
+            candidates = [obj for obj in gc.get_objects() if type(obj).__name__ == "MonitorEngine"]
+            if candidates:
+                # Pick candidate that is currently running a live feed or has the most alerts
+                active_obj = next((c for c in candidates if getattr(getattr(c, "dhan_provider", None), "_running", False)), None)
+                if not active_obj:
+                    active_obj = max(candidates, key=lambda c: len(getattr(c, "recent_alerts", [])))
+
+                # Cleanly shut down any duplicate ghost feeds running from previous reloads to stop duplicate Telegram alerts
+                for c in candidates:
+                    if c is not active_obj and getattr(c, "dhan_provider", None):
+                        try:
+                            if c.dhan_provider._running:
+                                c.dhan_provider.stop()
+                        except Exception:
+                            pass
+
+                cls._instance = active_obj
+                sys._monitor_engine_singleton = active_obj
+                return active_obj
+
+            # 3. Create fresh instance if none exists
+            cls._instance = cls()
+            sys._monitor_engine_singleton = cls._instance
+            return cls._instance
 
     def __init__(self) -> None:
         self.lock = threading.RLock()
@@ -166,21 +205,17 @@ class MonitorEngine:
     def update_dhan_credentials(self, client_id: str, access_token: str) -> None:
         """Update credentials dynamically and reconnect if active."""
         with self.lock:
-            if client_id is not None:
-                cid = str(client_id).strip().strip('"').strip("'")
-                if cid:
-                    os.environ["DHAN_CLIENT_ID"] = cid
-                    self.dhan_provider.client_id = cid
-            if access_token is not None:
-                tok = str(access_token).strip().strip('"').strip("'")
-                if tok:
-                    os.environ["DHAN_ACCESS_TOKEN"] = tok
-                    self.dhan_provider.access_token = tok
+            if client_id:
+                os.environ["DHAN_CLIENT_ID"] = client_id
+                self.dhan_provider.client_id = client_id
+            if access_token:
+                os.environ["DHAN_ACCESS_TOKEN"] = access_token
+                self.dhan_provider.access_token = access_token
 
             self.dhan_provider.last_error = None
             if self.dhan_provider._running:
                 self.dhan_provider.stop()
-
+            
             # If streaming is enabled, immediately launch the new feed with fresh token!
             if self.is_streaming_active:
                 self.dhan_provider.start_background_feed(on_tick_callback=self.process_tick)
